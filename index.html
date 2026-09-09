@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>I.B.E.X. — Institutional Backbone EXecutive</title>
+
+    <!-- PWA: installable app shell -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0a0101" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="IBEX" />
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
@@ -2803,6 +2814,17 @@
           window.deleteExamHistory=async(id)=>{if(!confirm('Delete this history record?'))return;try{await api(`/api/exam/history/${id}`,{method:'DELETE'});await loadHistory()}catch(e){alert(e.message)}};
           window.pdfHistory=()=>{const rows=window.__examHistoryRows||[];if(!rows.length){alert('No History records to download.');return;}const J=window.jspdf;if(!J?.jsPDF){alert('PDF library is unavailable.');return;}const doc=new J.jsPDF('l');const startY=ibexPdfHeader(doc,'Examination History','Every examination conducted, on record');doc.autoTable({startY,head:[['Subject','Topic','Batch','Exam Date']],body:rows.map(r=>[r.subject,r.topic,r.batch_name,r.exam_date]),...IBEX_PDF_TABLE_STYLE});doc.save('exam-history.pdf');};
         })();
+    </script>
+
+    <!-- PWA: register service worker for installable, app-like behavior -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch((err) => {
+                    console.warn('IBEX service worker registration failed:', err);
+                });
+            });
+        }
     </script>
 </body>
 </html>
