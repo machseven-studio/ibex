@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Header, Depends, Cookie, Request, Response
 from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 
 app = FastAPI(title="I.B.E.X.", version="4.1.0")
@@ -2012,6 +2013,32 @@ def read_root():
 
 
 HTML_CONTENT = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+
+# ---------------------------------------------------------------------------
+# PWA assets — installable app shell (manifest, service worker, icons).
+# These are static, non-sensitive files checked into the repo; no relation
+# to the authenticated /api/uploads/{filename} endpoint above.
+# ---------------------------------------------------------------------------
+
+MANIFEST_PATH = Path(__file__).with_name("manifest.json")
+SERVICE_WORKER_PATH = Path(__file__).with_name("sw.js")
+ICONS_DIR = Path(__file__).with_name("icons")
+
+
+@app.get("/manifest.json")
+def get_manifest():
+    return FileResponse(MANIFEST_PATH, media_type="application/manifest+json")
+
+
+@app.get("/sw.js")
+def get_service_worker():
+    # Served at root scope (not /icons or /static) so it can control the
+    # whole origin, which is required for the offline app-shell to work.
+    return FileResponse(SERVICE_WORKER_PATH, media_type="application/javascript")
+
+
+if ICONS_DIR.exists():
+    app.mount("/icons", StaticFiles(directory=str(ICONS_DIR)), name="icons")
 
 # ---------------------------------------------------------------------------
 # Examination module (Results / History) — single canonical implementation
