@@ -56,6 +56,7 @@
         .gold-bg { background: linear-gradient(135deg, #EACD6E, #AA771C); }
         .parallax-answer-gold {
             font-family: 'Cormorant Garamond', serif;
+            font-style: normal;
             font-weight: 700;
             font-size: 1.15rem;
             line-height: 1.65;
@@ -1289,26 +1290,59 @@
         }
 
         // ----- PDF / Excel exports -----
+        // Shared helper: institute name from header (falls back gracefully)
+        function getInstituteNameForExport() {
+            const el = document.getElementById('headerInstituteName');
+            const n = (el && el.textContent ? el.textContent : '').trim();
+            return n && n !== '—' ? n : 'I.B.E.X.';
+        }
+
+        /**
+         * Draws the standard I.B.E.X. PDF header.
+         * Layout:
+         *   - Institute name  (big, bold, centered)
+         *   - I.B.E.X. brand  (small) + "Powered by Metasys" (small, right)
+         *   - Document title  (bold)
+         *   - Subtitle        (optional)
+         *   - horizontal separator
+         * Returns the Y coordinate where content should begin.
+         */
         function ibexPdfHeader(doc, title, subtitle) {
             const pageWidth = doc.internal.pageSize.getWidth();
             const pageHeight = doc.internal.pageSize.getHeight();
+            // Beige paper background
             doc.setFillColor(250, 246, 233);
             doc.rect(0, 0, pageWidth, pageHeight, 'F');
+
+            // 1) Institute Name — large, bold, centered
+            const instituteName = getInstituteNameForExport();
             doc.setFont('times', 'bold');
             doc.setTextColor(120, 92, 30);
-            doc.setFontSize(20);
-            doc.text('I.B.E.X.', 14, 17);
+            doc.setFontSize(24);
+            doc.text(instituteName, pageWidth / 2, 20, { align: 'center' });
+
+            // 2) I.B.E.X. brand line
+            doc.setFont('times', 'bold');
+            doc.setFontSize(10);
+            doc.setTextColor(150, 120, 60);
+            doc.text('I.B.E.X.', 14, 30);
+            doc.setFont('times', 'normal');
+            doc.setFontSize(8);
+            doc.text('Powered by Metasys', pageWidth - 14, 30, { align: 'right' });
+
+            // 3) Document title
             doc.setFont('times', 'bold');
             doc.setFontSize(15);
             doc.setTextColor(45, 35, 15);
-            doc.text(String(title || ''), 14, 30);
-            let y = 30;
+            doc.text(String(title || ''), 14, 42);
+
+            let y = 42;
             if (subtitle) {
                 doc.setFont('times', 'normal');
                 doc.setFontSize(9);
                 doc.setTextColor(90, 78, 50);
-                doc.text(String(subtitle), 14, 36);
-                y = 36;
+                doc.text(String(subtitle), 14, 48);
+                y = 48;
             }
             doc.setDrawColor(190, 160, 90);
             doc.setLineWidth(0.4);
@@ -1979,6 +2013,8 @@
                 .replace(/\*/g, '')
                 .replace(/^\s{0,3}#{1,6}\s*/gm, '')
                 .replace(/#/g, '')
+                // Strip markdown italics/emphasis markers so the answer never renders italic
+                .replace(/_{1,2}(.+?)_{1,2}/g, '$1')
                 .trim();
         }
 
@@ -2035,13 +2071,25 @@
         // ----- Seating -----
         async function renderSeatingModule(container) {
             const canWrite = myPermission !== 'read_only' && !isGlobalView;
-            const res = await authFetch(`/api/seating/${currentBranchId}`);
-            const layouts = await res.json().catch(() => []);
-            if (!res.ok) {
+            const [layoutRes, studentRes] = await Promise.all([
+                authFetch(`/api/seating/${currentBranchId}`),
+                authFetch(`/api/records/students/${currentBranchId}`)
+            ]);
+            const layouts = await layoutRes.json().catch(() => []);
+            if (!layoutRes.ok) {
                 container.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-red-400">${esc(apiErrorMessage(layouts.detail, 'Failed to load seating plans.'))}</div>`;
                 return;
             }
+            const students = await studentRes.json().catch(() => []);
             window.seatingLayouts = Array.isArray(layouts) ? layouts : [];
+
+            const batchSet = new Set();
+            (Array.isArray(students) ? students : []).forEach(s => {
+                const b = (s.batch || '').trim();
+                if (b) batchSet.add(b);
+            });
+            const allBatches = [...batchSet].sort((a, b) => a.localeCompare(b));
+
             container.innerHTML = `
                 <div class="space-y-8">
                     <div class="flex justify-between items-center flex-wrap gap-3">
@@ -2059,6 +2107,23 @@
                             <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Rows</label><input id="seatRows" type="number" min="1" max="100" placeholder="5" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                             <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Columns</label><input id="seatColumns" type="number" min="1" max="100" placeholder="8" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                         </div>
+                        <div class="mt-5">
+                            <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Scheduled Batches <span class="text-gray-600 normal-case font-normal">(select the batches this exam is being held for — obsolete batches are ignored)</span></label>
+                            <div id="seatBatchPicker" class="flex flex-wrap gap-2">
+                                ${allBatches.length === 0
+                                    ? '<p class="text-xs text-gray-500">No batches found. Add students with batch names first.</p>'
+                                    : allBatches.map(b => `
+                                        <label class="inline-flex items-center gap-2 bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 cursor-pointer text-xs text-gray-200 hover:border-yellow-600 transition-colors">
+                                            <input type="checkbox" class="seat-batch-check module-check" value="${esc(b)}">
+                                            <span>${esc(b)}</span>
+                                        </label>
+                                    `).join('')}
+                            </div>
+                            <div class="mt-2 flex items-center gap-3 text-[11px] text-gray-500">
+                                <button type="button" onclick="document.querySelectorAll('.seat-batch-check').forEach(c => c.checked = true)" class="gold-gradient-text font-bold hover:underline">Select All</button>
+                                <button type="button" onclick="document.querySelectorAll('.seat-batch-check').forEach(c => c.checked = false)" class="text-gray-400 hover:text-gray-200">Clear</button>
+                            </div>
+                        </div>
                         <button onclick="generateSeatingPlan()" class="mt-5 gold-bg hover:opacity-95 text-black font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Generate Seating Plan</button>
                     </div>` : ''}
                     <div id="seatingLayoutsContainer" class="space-y-6"></div>
@@ -2072,10 +2137,12 @@
             const room_number = document.getElementById('seatRoom').value.trim();
             const rows = parseInt(document.getElementById('seatRows').value, 10);
             const columns = parseInt(document.getElementById('seatColumns').value, 10);
+            const batches = Array.from(document.querySelectorAll('.seat-batch-check:checked')).map(el => el.value);
             if (!exam_date || !room_number || !rows || !columns) { alert('Exam date, room number, rows and columns are required.'); return; }
+            if (batches.length === 0) { alert('Select at least one batch that is scheduled to appear for this exam.'); return; }
             const res = await authFetch('/api/seating/generate', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ branch_id: currentBranchId, exam_date, room_number, rows, columns })
+                body: JSON.stringify({ branch_id: currentBranchId, exam_date, room_number, rows, columns, batches })
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) { alert(apiErrorMessage(data.detail, 'Could not generate seating plan.')); return; }
@@ -2947,7 +3014,7 @@
             }
         };
 
-        console.log('I.B.E.X. fully loaded – 4-head nav, journal, audit history, slump detector.');
+        console.log('I.B.E.X. fully loaded – 4-head nav, journal, audit history, slump detector, batch-scoped seating.');
     </script>
 
     <!-- Embedded exam results/history scripts -->
@@ -3023,8 +3090,71 @@
           window.deleteExamResult=async(id)=>{if(!confirm('Delete this result record?'))return;try{await api(`/api/exam/results/${id}`,{method:'DELETE'});await renderResults();}catch(e){alert(e.message)}};
           window.editExamResult=async(id)=>{const r=(window.__examResultRows||[]).find(x=>x.id===id);if(!r)return;document.getElementById('erBatch').value=r.batch_name;document.getElementById('erSubjects').value=r.subjects;document.getElementById('erTopics').value=r.topics;document.getElementById('erDate').value=r.exam_date;document.getElementById('erOverall').value=r.overall_marks;await loadResultsStudents();const inp=document.querySelector(`[data-mark-for="${r.student_id}"]`);if(inp)inp.value=r.marks??'';window.__examEditingId=id;document.getElementById('erLoad').textContent='UPDATE STUDENT';document.getElementById('erLoad').onclick=async()=>{try{const s=(window.__examStudents||[]).find(x=>x.id===r.student_id),m=Number(document.querySelector(`[data-mark-for="${r.student_id}"]`).value),meta=window.__examResultMeta;await api(`/api/exam/results/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:Number(branchId()),batch_name:meta.batch,subjects:meta.subjects,topics:meta.topics,exam_date:meta.date,overall_marks:Number(meta.overall),student_id:r.student_id,student_name:s.name,roll_number:s.roll_number,marks:m})});await renderResults();}catch(e){alert(e.message)}}};
 
-          function pdfResults(){ const rows=window.__examResultRows||[]; if(!rows.length){alert('No saved result records to download.');return;} const J=window.jspdf; if(!J?.jsPDF){alert('PDF library is unavailable.');return;} const doc=new J.jsPDF('l'); const startY=ibexPdfHeader(doc,'Examination Results','Recorded marks across all saved batches'); doc.autoTable({startY,head:[['Batch','Subject(s)','Topic(s)','Date','Student','Roll','Marks']],body:rows.map(r=>[r.batch_name,r.subjects,r.topics,r.exam_date,r.student_name,r.roll_number||'',`${r.marks??''} / ${r.overall_marks}`]),...IBEX_PDF_TABLE_STYLE});doc.save('exam-results.pdf'); }
-          window.pdfResults=pdfResults;
+          /**
+           * Examination Results PDF.
+           * Structure requested:
+           *   - Header (institute name at top, etc.)
+           *   - For each (batch + subject + topic + date + overall) group:
+           *       * Big heading above the grid:  "Batch · Subject"
+           *       * Subheading line:             "Topic: X | Date: Y | Overall: Z"
+           *       * Table with:                  Student Name | Roll Number | Marks / Z
+           */
+          function pdfResults() {
+            const rows = window.__examResultRows || [];
+            if (!rows.length) { alert('No saved result records to download.'); return; }
+            const J = window.jspdf;
+            if (!J?.jsPDF) { alert('PDF library is unavailable.'); return; }
+            const doc = new J.jsPDF('l');
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            let y = ibexPdfHeader(doc, 'Examination Results', 'Marks recorded for every examination paper');
+
+            // Group by batch + subjects + topics + exam_date + overall_marks
+            const groups = new Map();
+            rows.forEach(r => {
+              const key = [r.batch_name || '', r.subjects || '', r.topics || '', r.exam_date || '', r.overall_marks ?? ''].join('||');
+              if (!groups.has(key)) groups.set(key, []);
+              groups.get(key).push(r);
+            });
+
+            groups.forEach((records, key) => {
+              const [batch, subjects, topics, examDate, overall] = key.split('||');
+
+              // If we're running out of room, start a new page
+              if (y > pageHeight - 60) {
+                doc.addPage();
+                y = ibexPdfHeader(doc, 'Examination Results (continued)', '');
+              }
+
+              // Big heading above the grid — subject & batch only once per paper
+              doc.setFont('times', 'bold');
+              doc.setFontSize(16);
+              doc.setTextColor(45, 35, 15);
+              doc.text(`${batch}  ·  ${subjects}`, 14, y);
+              y += 8;
+
+              doc.setFont('times', 'normal');
+              doc.setFontSize(10);
+              doc.setTextColor(90, 78, 50);
+              doc.text(`Topic(s): ${topics || '—'}   |   Exam Date: ${examDate || '—'}   |   Overall Marks: ${overall || '—'}`, 14, y);
+              y += 6;
+
+              doc.autoTable({
+                startY: y,
+                head: [['Student Name', 'Roll Number', `Marks / ${overall || '—'}`]],
+                body: records.map(r => [
+                  r.student_name || '',
+                  r.roll_number || '—',
+                  r.marks != null ? String(r.marks) : '—'
+                ]),
+                ...IBEX_PDF_TABLE_STYLE,
+              });
+              y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : y) + 14;
+            });
+
+            doc.save('exam-results.pdf');
+          }
+          window.pdfResults = pdfResults;
 
           window.renderHistory = async function(){const host=contentHost();examRoot=document.createElement('div');examRoot.id='examUpgradeRoot';host.innerHTML='';host.appendChild(examRoot);examRoot.innerHTML=header('History','Keep a clean record of every examination conducted.')+card(`<div class="grid md:grid-cols-4 gap-3">${field('ehSubject','Subject')}${field('ehTopic','Topic')}${field('ehBatch','Batch name')}${field('ehDate','Exam date','date')}</div><div class="mt-4 flex gap-2"><button id="ehSave" class="px-4 py-2 rounded-xl bg-yellow-700/20 border border-yellow-800 text-yellow-500 font-bold text-xs uppercase tracking-widest">Save Record</button><button onclick="pdfHistory()" class="px-4 py-2 rounded-xl border border-gray-800 text-gray-300 font-bold text-xs uppercase tracking-widest">Download PDF</button></div><div id="ehTable" class="mt-6 overflow-x-auto"></div>`);document.getElementById('ehSave').onclick=saveHistory;await loadHistory();}
           async function saveHistory(){try{const p={branch_id:Number(branchId()),subject:document.getElementById('ehSubject').value.trim(),topic:document.getElementById('ehTopic').value.trim(),batch_name:document.getElementById('ehBatch').value.trim(),exam_date:document.getElementById('ehDate').value};if(!p.subject||!p.topic||!p.batch_name||!p.exam_date)throw new Error('Fill all History fields.');if(window.__historyEditingId)await api(`/api/exam/history/${window.__historyEditingId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});else await api('/api/exam/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});window.__historyEditingId=null;await loadHistory();}catch(e){alert(e.message)}}
