@@ -10,7 +10,6 @@ import secrets
 import shutil
 import psycopg2
 import bcrypt
-import razorpay
 from psycopg2.extras import DictCursor
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -113,13 +112,6 @@ WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 
-# Razorpay online payments configuration. Both keys are required for the
-# /api/payments/* endpoints to work; if either is missing the endpoints
-# return 503 and the frontend falls back to the manual "Mark Paid" flow.
-RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
-RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
-RAZORPAY_CURRENCY = os.getenv("RAZORPAY_CURRENCY", "INR")
-
 
 # ---------------------------------------------------------------------------
 # Database setup
@@ -151,7 +143,7 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS timetable_configs (id SERIAL PRIMARY KEY, branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE, batch_name TEXT NOT NULL, timings_json TEXT NOT NULL, teachers_config_json TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL, UNIQUE(branch_id, batch_name))""",
         """CREATE TABLE IF NOT EXISTS exam_seatings (id SERIAL PRIMARY KEY, branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE, exam_date TEXT NOT NULL, room_number TEXT NOT NULL, rows INTEGER NOT NULL, columns INTEGER NOT NULL, assignments_json TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)""",
         """CREATE TABLE IF NOT EXISTS invigilation (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, teacher_name TEXT, exam_date TEXT, room TEXT, document TEXT)""",
-        """CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, student_name TEXT, amount_inr NUMERIC(12,2), status TEXT, due_date TEXT, document TEXT, utr_reference TEXT, paid_at TIMESTAMPTZ, paid_by INTEGER, razorpay_order_id TEXT, razorpay_payment_id TEXT)""",
+        """CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, student_name TEXT, amount_inr NUMERIC(12,2), status TEXT, due_date TEXT, document TEXT, utr_reference TEXT, paid_at TIMESTAMPTZ, paid_by INTEGER)""",
         """CREATE TABLE IF NOT EXISTS audit_log (id BIGSERIAL PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(), user_id INTEGER, branch_id INTEGER, action_type TEXT NOT NULL, before_after_payload JSONB NOT NULL DEFAULT '{}'::jsonb)""",
     ]
     for stmt in statements:
@@ -238,8 +230,6 @@ def init_db():
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS utr_reference TEXT",
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ",
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid_by INTEGER",
-        "ALTER TABLE fees ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT",
-        "ALTER TABLE fees ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT",
     ]:
         cur.execute(stmt)
     for stmt in [
@@ -1071,156 +1061,6 @@ def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_acces
         return {"sent": sent_count}
     finally:
         conn.close()
-
-
-# ================================
-# RAZORPAY ONLINE PAYMENTS
-# ================================
-# Flow:
-#   1. Client POSTs /api/payments/create-order { fee_id }
-#   2. Server creates a Razorpay order for the fee amount, stores order_id on
-#      the fee row, and returns { order_id, amount, currency, key_id, ... }.
-#   3. Client opens Razorpay Checkout with those values.
-#   4. On success Razorpay calls back with (order_id, payment_id, signature).
-#   5. Client POSTs /api/payments/verify with those three values.
-#   6. Server verifies the HMAC signature server-side using the secret, then
-#      marks the fee paid and stores the payment id as the UTR reference.
-# If the keys are not configured on the server, create-order returns 503 and
-# the frontend falls back to the manual "Mark Paid" flow.
-
-def _razorpay_client():
-    if not (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET):
-        raise HTTPException(status_code=503, detail="Online payments are not configured on this server.")
-    return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-
-
-@app.get("/api/payments/config")
-def payments_config(institute: CurrentInstitute = Depends(get_current_institute)):
-    """Lets the frontend know whether to show the Pay Now button at all.
-    Never returns the secret - only the public key id."""
-    return {
-        "enabled": bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET),
-        "key_id": RAZORPAY_KEY_ID or "",
-        "currency": RAZORPAY_CURRENCY,
-    }
-
-
-class PaymentCreateOrderRequest(BaseModel):
-    fee_id: int
-
-
-@app.post("/api/payments/create-order")
-def create_payment_order(req: PaymentCreateOrderRequest, institute: CurrentInstitute = Depends(require_write_access)):
-    check_module_access(institute, "fees")
-    client = _razorpay_client()
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """SELECT f.* FROM fees f
-               JOIN branches b ON b.id = f.branch_id
-               WHERE f.id = %s AND b.tenant_id = %s""",
-            (req.fee_id, institute.id),
-        )
-        fee = cur.fetchone()
-        if not fee:
-            raise HTTPException(status_code=404, detail="Fee record not found")
-        if str(fee["status"] or "").lower() == "paid":
-            raise HTTPException(status_code=400, detail="This fee is already marked as paid.")
-        amount = float(fee["amount_inr"] or 0)
-        if amount <= 0:
-            raise HTTPException(status_code=400, detail="Fee amount must be greater than zero.")
-
-        amount_paise = int(round(amount * 100))
-        try:
-            order = client.order.create({
-                "amount": amount_paise,
-                "currency": RAZORPAY_CURRENCY,
-                "receipt": f"fee_{req.fee_id}",
-                "notes": {
-                    "fee_id": str(req.fee_id),
-                    "student": (fee["student_name"] or "")[:120],
-                    "institute_id": str(institute.id),
-                },
-            })
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {e}")
-
-        cur.execute("UPDATE fees SET razorpay_order_id = %s WHERE id = %s", (order["id"], req.fee_id))
-        conn.commit()
-    finally:
-        conn.close()
-
-    audit_write(institute, fee["branch_id"], "CREATE_PAYMENT_ORDER", None,
-                {"fee_id": req.fee_id, "order_id": order["id"], "amount": amount})
-    return {
-        "order_id": order["id"],
-        "amount": amount_paise,
-        "currency": RAZORPAY_CURRENCY,
-        "key_id": RAZORPAY_KEY_ID,
-        "fee_id": req.fee_id,
-        "student_name": fee["student_name"] or "",
-    }
-
-
-class PaymentVerifyRequest(BaseModel):
-    fee_id: int
-    razorpay_order_id: str
-    razorpay_payment_id: str
-    razorpay_signature: str
-
-
-@app.post("/api/payments/verify")
-def verify_payment(req: PaymentVerifyRequest, institute: CurrentInstitute = Depends(require_write_access)):
-    check_module_access(institute, "fees")
-    client = _razorpay_client()
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """SELECT f.* FROM fees f
-               JOIN branches b ON b.id = f.branch_id
-               WHERE f.id = %s AND b.tenant_id = %s""",
-            (req.fee_id, institute.id),
-        )
-        fee = cur.fetchone()
-        if not fee:
-            raise HTTPException(status_code=404, detail="Fee record not found")
-
-        # Server-side signature verification. This is the only trustworthy
-        # check - the browser is never trusted to say "the payment succeeded".
-        try:
-            client.utility.verify_payment_signature({
-                "razorpay_order_id": req.razorpay_order_id,
-                "razorpay_payment_id": req.razorpay_payment_id,
-                "razorpay_signature": req.razorpay_signature,
-            })
-        except Exception:
-            audit_write(institute, fee["branch_id"], "PAYMENT_VERIFY_FAILED", dict(fee),
-                        {"order_id": req.razorpay_order_id, "payment_id": req.razorpay_payment_id})
-            raise HTTPException(status_code=400, detail="Payment signature verification failed.")
-
-        cur.execute(
-            """UPDATE fees
-               SET status = 'Paid',
-                   utr_reference = %s,
-                   razorpay_order_id = %s,
-                   razorpay_payment_id = %s,
-                   paid_at = NOW(),
-                   paid_by = %s
-               WHERE id = %s""",
-            (req.razorpay_payment_id, req.razorpay_order_id, req.razorpay_payment_id,
-             institute.user_id, req.fee_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-    audit_write(institute, fee["branch_id"], "PAYMENT_VERIFIED", dict(fee),
-                {"order_id": req.razorpay_order_id, "payment_id": req.razorpay_payment_id})
-    return {"status": "paid", "fee_id": req.fee_id, "payment_id": req.razorpay_payment_id}
 
 
 # ---------------------------------------------------------------------------
