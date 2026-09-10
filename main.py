@@ -87,16 +87,17 @@ VALID_MODULES = ['students', 'teachers', 'classrooms', 'syllabus', 'attendance',
 SEATING_MODULE = 'seating'
 
 # --- 4-HEAD NAVIGATION TAXONOMY -------------------------------------------
+# Journal + Audit History now live under the Management (front_office) head.
 ACCESS_HEADS = ['homepage', 'administrations', 'examination', 'front_office']
 MODULE_HEAD = {
     'analytics': 'homepage', 'assistant': 'homepage', 'students': 'homepage',
     'teachers': 'homepage', 'classrooms': 'homepage',
-    'journal': 'homepage', 'audit_history': 'homepage',
     'attendance': 'administrations', 'syllabus': 'administrations',
     'timetables': 'administrations', 'whatsapp': 'administrations',
     'seating': 'examination', 'invigilation': 'examination',
     'results': 'examination', 'history': 'examination',
     'inquiry': 'front_office', 'fees': 'front_office', 'users': 'front_office',
+    'journal': 'front_office', 'audit_history': 'front_office',
 }
 OWNER_ONLY_MODULES = {'users', 'journal', 'audit_history'}
 STAFF_GRANTABLE_MODULES = [
@@ -1498,7 +1499,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         unavailable = {str(d).strip() for d in t_config.get('unavailable_days', [])}
         if not teacher_name or target_lectures == 0: continue
         assigned_count = 0; used_days = []
-        # Track which lecture numbers this teacher has already been assigned on each day
         used_lecture_nums_by_day = defaultdict(list)
 
         eligible_days = [d for d in days if d not in unavailable]
@@ -1521,21 +1521,16 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
                     idx = day_index[day]
                     min_distance = min((abs(idx - used) for used in used_days), default=5)
 
-                    # --- FIX: prevent the same teacher/subject from getting
-                    # multiple lectures back-to-back on one day while other
-                    # eligible days remain available.
+                    # Hard prevention: don't reuse a day while other eligible days remain
                     other_unused_days_exist = any(
                         day_index[d] not in used_days for d in eligible_days
                     )
                     if idx in used_days and other_unused_days_exist:
-                        # Massive hard penalty - only chosen as an absolute last resort
                         same_day_penalty = 1_000_000
                     else:
                         same_day_penalty = 0
 
-                    # Even when a day must be reused (all other days exhausted),
-                    # prefer non-consecutive lecture numbers so we don't stack
-                    # them back-to-back.
+                    # When a day must be reused, avoid back-to-back lecture numbers
                     consecutive_penalty = 0
                     if idx in used_days:
                         for other_lc in used_lecture_nums_by_day.get(idx, []):
@@ -1638,8 +1633,6 @@ class SeatingGenerateRequest(BaseModel):
     room_number: str
     rows: int
     columns: int
-    # Only seat students belonging to these batches. If omitted/empty, all
-    # students in the branch are considered (legacy behaviour).
     batches: list[str] | None = None
 
 
@@ -1718,8 +1711,6 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
         conn.close(); raise HTTPException(status_code=400, detail=f"Grid capacity ({requested_capacity}) exceeds room capacity ({room_capacity}).")
     cursor = conn.cursor()
 
-    # Determine which students are eligible based on selected batches.
-    # If no batches are provided, fall back to legacy behaviour (all students).
     selected_batches = [str(b).strip() for b in (req.batches or []) if str(b).strip()]
 
     if selected_batches:
