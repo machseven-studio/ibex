@@ -91,18 +91,23 @@ def clear_session_cookie(response: "Response"):
 VALID_MODULES = ['students', 'teachers', 'classrooms', 'syllabus', 'attendance', 'invigilation', 'fees']
 SEATING_MODULE = 'seating'
 
-# 'timetables' isn't a generic /api/records table (it has its own dedicated
-# endpoints below) but it IS a sidebar module a staff designation can be
-# granted or denied access to, so it's included here for permission checks.
+# Every individually-grantable leaf module, keyed to the parent it lives
+# under in the sidebar. Manage Users grants/checks access at this leaf
+# level (not the old head level) so a staff member can be given, say,
+# just "Attendance" without also getting "Fees" or "WhatsApp Messaging".
 ACCESS_HEADS = ['homepage', 'administrations', 'examination']
 MODULE_HEAD = {
     'analytics': 'homepage', 'assistant': 'homepage', 'students': 'homepage',
     'teachers': 'homepage', 'classrooms': 'homepage', 'users': 'homepage',
     'attendance': 'administrations', 'syllabus': 'administrations',
-    'timetables': 'administrations', 'fees': 'administrations',
-    'seating': 'examination', 'invigilation': 'examination',
+    'timetables': 'administrations', 'fees': 'administrations', 'whatsapp': 'administrations',
+    'seating': 'examination', 'invigilation': 'examination', 'results': 'examination', 'history': 'examination',
 }
-ALL_ACCESS_MODULES = ACCESS_HEADS
+# Homepage's children (analytics, Parallax, the three departments, Manage
+# Users) stay owner-only, same as before — only Administrations' and
+# Examination's children can be handed out to staff.
+STAFF_GRANTABLE_MODULES = [m for m, h in MODULE_HEAD.items() if h in ('administrations', 'examination')]
+ALL_ACCESS_MODULES = list(MODULE_HEAD.keys())
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
@@ -314,11 +319,11 @@ class CurrentInstitute(BaseModel):
 
 
 def check_module_access(institute: "CurrentInstitute", module: str):
-    # Owners can use everything. Staff receive only category privileges.
+    # Owners can use everything. Staff are granted individual leaf modules
+    # now (e.g. "attendance", "results") rather than whole parent heads.
     if institute.is_owner:
         return
-    head = MODULE_HEAD.get(module, module)
-    if head not in institute.allowed_modules:
+    if module not in institute.allowed_modules:
         raise HTTPException(status_code=403, detail=f"Your account does not have access to the {module.title()} module")
 
 
@@ -637,9 +642,9 @@ class StaffPermissionUpdate(BaseModel):
 def _validate_modules(modules: list):
     if not isinstance(modules, list):
         raise HTTPException(status_code=400, detail="Module privileges must be a list")
-    bad = [m for m in modules if m not in ACCESS_HEADS]
+    bad = [m for m in modules if m not in STAFF_GRANTABLE_MODULES]
     if bad:
-        raise HTTPException(status_code=400, detail="Module privileges must be Homepage, Administrations, or Examination")
+        raise HTTPException(status_code=400, detail=f"Unknown module privilege(s): {', '.join(bad)}")
 
 
 @app.get("/api/users")
@@ -979,8 +984,7 @@ def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = 
     try:
         cur = conn.cursor()
         for module in ("students", "teachers", "classrooms", "syllabus", "attendance", "fees", "invigilation"):
-            head = MODULE_HEAD.get(module)
-            if not institute.is_owner and head not in (institute.allowed_modules or []):
+            if not institute.is_owner and module not in (institute.allowed_modules or []):
                 continue
             fields = RECORD_FIELDS[module]
             clauses = " OR ".join(f"CAST({f} AS TEXT) ILIKE %s" for f in fields)
@@ -2115,8 +2119,8 @@ class ExamHistoryPayload(BaseModel):
     batch_name: str
     exam_date: str
 
-def _exam_branch_check(institute, branch_id: int):
-    check_module_access(institute, "examination")
+def _exam_branch_check(institute, branch_id: int, module: str):
+    check_module_access(institute, module)
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2135,7 +2139,7 @@ def _valid_marks(marks, overall):
 
 @app.get("/api/exam/results/students/{branch_id}")
 def exam_result_students(branch_id: int, batch: str, institute: CurrentInstitute = Depends(get_current_institute)):
-    _exam_branch_check(institute, branch_id)
+    _exam_branch_check(institute, branch_id, "results")
     if not batch.strip():
         raise HTTPException(status_code=400, detail="Batch is required")
     conn = get_conn()
@@ -2153,7 +2157,7 @@ def exam_result_students(branch_id: int, batch: str, institute: CurrentInstitute
 
 @app.get("/api/exam/results/{branch_id}")
 def list_exam_results(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
-    _exam_branch_check(institute, branch_id)
+    _exam_branch_check(institute, branch_id, "results")
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2170,7 +2174,7 @@ def list_exam_results(branch_id: int, institute: CurrentInstitute = Depends(get_
 
 @app.post("/api/exam/results")
 def create_exam_result(payload: ExamResultPayload, institute: CurrentInstitute = Depends(require_write_access)):
-    _exam_branch_check(institute, payload.branch_id)
+    _exam_branch_check(institute, payload.branch_id, "results")
     overall = float(payload.overall_marks)
     if overall <= 0:
         raise HTTPException(status_code=400, detail="Overall marks must be greater than zero.")
@@ -2190,7 +2194,7 @@ def create_exam_result(payload: ExamResultPayload, institute: CurrentInstitute =
 
 @app.patch("/api/exam/results/{result_id}")
 def update_exam_result(result_id: int, payload: ExamResultPayload, institute: CurrentInstitute = Depends(require_write_access)):
-    _exam_branch_check(institute, payload.branch_id)
+    _exam_branch_check(institute, payload.branch_id, "results")
     marks = _valid_marks(payload.marks, float(payload.overall_marks))
     conn = get_conn()
     try:
@@ -2209,7 +2213,7 @@ def update_exam_result(result_id: int, payload: ExamResultPayload, institute: Cu
 
 @app.delete("/api/exam/results/{result_id}")
 def delete_exam_result(result_id: int, institute: CurrentInstitute = Depends(require_write_access)):
-    check_module_access(institute, "examination")
+    check_module_access(institute, "results")
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2221,7 +2225,7 @@ def delete_exam_result(result_id: int, institute: CurrentInstitute = Depends(req
 
 @app.get("/api/exam/history/{branch_id}")
 def list_exam_history(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
-    _exam_branch_check(institute, branch_id)
+    _exam_branch_check(institute, branch_id, "history")
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2232,7 +2236,7 @@ def list_exam_history(branch_id: int, institute: CurrentInstitute = Depends(get_
 
 @app.post("/api/exam/history")
 def create_exam_history(payload: ExamHistoryPayload, institute: CurrentInstitute = Depends(require_write_access)):
-    _exam_branch_check(institute, payload.branch_id)
+    _exam_branch_check(institute, payload.branch_id, "history")
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2243,7 +2247,7 @@ def create_exam_history(payload: ExamHistoryPayload, institute: CurrentInstitute
 
 @app.patch("/api/exam/history/{history_id}")
 def update_exam_history(history_id: int, payload: ExamHistoryPayload, institute: CurrentInstitute = Depends(require_write_access)):
-    _exam_branch_check(institute, payload.branch_id)
+    _exam_branch_check(institute, payload.branch_id, "history")
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2256,7 +2260,7 @@ def update_exam_history(history_id: int, payload: ExamHistoryPayload, institute:
 
 @app.delete("/api/exam/history/{history_id}")
 def delete_exam_history(history_id: int, institute: CurrentInstitute = Depends(require_write_access)):
-    check_module_access(institute, "examination")
+    check_module_access(institute, "history")
     conn = get_conn()
     try:
         cur=conn.cursor()
