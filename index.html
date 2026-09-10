@@ -4,8 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>I.B.E.X. — Institutional Backbone EXecutive</title>
-
-    <!-- PWA: installable app shell -->
     <link rel="manifest" href="/manifest.json" />
     <meta name="theme-color" content="#0a0101" />
     <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
@@ -21,11 +19,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* --- Global reset & fonts --- */
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&display=swap');
 
         * { box-sizing: border-box; }
-
         body {
             font-family: 'Plus Jakarta Sans', sans-serif;
             background-color: #1a0505;
@@ -39,7 +35,6 @@
             overflow-x: hidden;
             font-weight: 500;
         }
-
         .elegant-font { font-family: 'Fraunces', serif; font-weight: 600; }
         h1, h2, h3 { font-family: 'Fraunces', serif; letter-spacing: -0.01em; }
         .premium-heading-font { font-family: 'Playfair Display', serif; font-weight: 800; letter-spacing: -0.01em; }
@@ -51,18 +46,14 @@
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
-
         .header-autohide { transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform; }
         .header-autohide.header-hidden { transform: translateY(-100%); }
-
         .gold-border { border-color: rgba(212, 175, 55, 0.28); }
         .gold-border-glow:focus, .gold-border-glow:hover {
             border-color: #D4AF37;
             box-shadow: 0 0 12px rgba(212, 175, 55, 0.18);
         }
-
         .gold-bg { background: linear-gradient(135deg, #EACD6E, #AA771C); }
-
         .parallax-answer-gold {
             font-family: 'Cormorant Garamond', serif;
             font-weight: 700;
@@ -74,14 +65,12 @@
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
-
         .glass-panel {
             background: linear-gradient(160deg, rgba(40, 8, 8, 0.88), rgba(10, 2, 2, 0.96));
             border: 1px solid rgba(212, 175, 55, 0.18);
             box-shadow: 0 12px 32px rgba(0,0,0,0.55);
             backdrop-filter: blur(2px);
         }
-
         #appContainer header {
             background: rgba(10, 3, 3, 0.92);
             border-bottom-color: rgba(212, 175, 55, 0.18);
@@ -100,73 +89,39 @@
             position: relative;
         }
         #moduleSidebar.sidebar-collapsed {
-            width: 0 !important;
-            min-width: 0 !important;
-            padding: 0 !important;
-            border-right: none;
-            flex: 0 0 0 !important;
-            overflow: visible;
+            width: 0 !important; min-width: 0 !important; padding: 0 !important;
+            border-right: none; flex: 0 0 0 !important; overflow: visible;
         }
         #moduleSidebar .sidebar-fade-text,
         #moduleSidebar .sidebar-item,
-        #moduleSidebar .module-head-group {
-            transition: opacity 0.2s ease;
-        }
+        #moduleSidebar .module-head-group { transition: opacity 0.2s ease; }
         #moduleSidebar.sidebar-collapsed .sidebar-fade-text,
         #moduleSidebar.sidebar-collapsed .sidebar-item,
-        #moduleSidebar.sidebar-collapsed .module-head-group {
-            opacity: 0;
-            pointer-events: none;
-        }
+        #moduleSidebar.sidebar-collapsed .module-head-group { opacity: 0; pointer-events: none; }
         #sidebarCollapseButton {
-            position: absolute;
-            top: 10px;
-            right: -14px;
-            z-index: 30;
-            width: 28px;
-            height: 28px;
-            border: 1px solid rgba(212,175,55,.38);
-            border-radius: 999px;
-            background: #0b0b0b;
-            color: #e8c767;
-            font-size: 18px;
-            line-height: 24px;
-            box-shadow: 0 4px 12px rgba(0,0,0,.45);
-            cursor: pointer;
+            position: absolute; top: 10px; right: -14px; z-index: 30;
+            width: 28px; height: 28px; border: 1px solid rgba(212,175,55,.38);
+            border-radius: 999px; background: #0b0b0b; color: #e8c767;
+            font-size: 18px; line-height: 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,.45); cursor: pointer;
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
         }
         #sidebarCollapseButton:hover { border-color: #d4af37; }
-        #moduleSidebar.sidebar-collapsed #sidebarCollapseButton {
-            transform: translateX(calc(100% + 10px));
-        }
-        #moduleSidebar.sidebar-collapsed + #mainContent {
-            margin-left: 0;
-        }
-
-        #mainContent {
-            flex: 1;
-            padding: 1.5rem 2rem;
-            background: rgba(0,0,0,0.15);
-            transition: margin-left 0.35s ease;
-        }
-
+        #moduleSidebar.sidebar-collapsed #sidebarCollapseButton { transform: translateX(calc(100% + 10px)); }
+        #moduleSidebar.sidebar-collapsed + #mainContent { margin-left: 0; }
+        #mainContent { flex: 1; padding: 1.5rem 2rem; background: rgba(0,0,0,0.15); transition: margin-left 0.35s ease; }
         #mainContent { background: rgba(0,0,0,0.15); }
-
         .mini-bar-track { background: rgba(212,175,55,0.08); border-radius: 999px; overflow: hidden; height: 8px; }
         .mini-bar-fill { background: linear-gradient(90deg, #8a6a22, #E8C767); height: 100%; border-radius: 999px; transition: width 0.4s ease; }
         .module-check { accent-color: #D4AF37; }
         .ongoing-dot { width: 7px; height: 7px; border-radius: 999px; background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,0.7); display: inline-block; }
-
         .perm-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; }
         .perm-edit { background: rgba(212,175,55,0.15); color: #E8C767; border: 1px solid rgba(212,175,55,0.35); }
         .perm-readonly { background: rgba(148,163,184,0.1); color: #9ca3af; border: 1px solid rgba(148,163,184,0.25); }
-
         .sidebar-item {
             transition: background-color 0.1s ease, color 0.1s ease, border-color 0.1s ease;
-            letter-spacing: 0.06em;
-            will-change: background, color;
-            padding-left: 1rem !important;
-            border-left: none !important;
+            letter-spacing: 0.06em; will-change: background, color;
+            padding-left: 1rem !important; border-left: none !important;
         }
         .sidebar-item:hover, .sidebar-item.active {
             background: rgba(212, 175, 55, 0.12);
@@ -174,242 +129,115 @@
             border-left: 3px solid #D4AF37 !important;
             padding-left: 1.75rem !important;
         }
-
         .fast-transition {
             transition: background-color 0.1s ease, color 0.1s ease, opacity 0.1s ease, transform 0.1s ease;
             will-change: transform, opacity;
         }
         .fast-transition:active { transform: scale(0.97); }
-
         .branch-icon-btn {
-            width: 28px;
-            height: 28px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            line-height: 1;
-            border-radius: 6px;
-            background: #1a1a1a;
-            border: 1px solid rgba(212,175,55,0.3);
-            color: #d4af37;
+            width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+            font-size: 14px; line-height: 1; border-radius: 6px; background: #1a1a1a;
+            border: 1px solid rgba(212,175,55,0.3); color: #d4af37;
             transition: background-color 0.1s ease, color 0.1s ease;
             will-change: background, color;
         }
         .branch-icon-btn:hover { background: #252525; color: #E8C767; }
-
         .row-delete-btn { color: #6b7280; transition: color 0.1s ease; }
         .row-delete-btn:hover { color: #f87171; }
-
         ::-webkit-scrollbar { width: 5px; height: 5px; }
         ::-webkit-scrollbar-track { background: #0a0a0a; }
         ::-webkit-scrollbar-thumb { background: #332d16; border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: #D4AF37; }
-
         .auth-error { color: #f87171; font-size: 11px; margin-top: 6px; min-height: 14px; }
         .editable-name { cursor: text; border-bottom: 1px dashed rgba(212,175,55,0.4); }
         .editable-name:hover { border-bottom-color: #D4AF37; }
-
         .welcome-animate { animation: welcomeFadeSlide 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
         @keyframes welcomeFadeSlide {
             0% { opacity: 0; transform: translateY(16px); }
             100% { opacity: 1; transform: translateY(0); }
         }
-
         .batch-group-row td { background: rgba(212, 175, 55, 0.06); }
         .global-readonly #branchSelector { color: #cbd5e1; }
         .global-readonly .gold-bg { opacity: .45; pointer-events: none; }
         @media (min-width: 1024px) { #mainContent { padding: 1.5rem 2rem; } }
-
         #mobileSidebarToggle {
-            display: flex;
-            width: 34px;
-            height: 34px;
-            flex-shrink: 0;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            border-radius: 6px;
-            border: 1px solid rgba(212,175,55,0.3);
-            background: #1a1a1a;
-            color: #d4af37;
-            cursor: pointer;
-            transition: background-color 0.1s ease, color 0.1s ease;
+            display: flex; width: 34px; height: 34px; flex-shrink: 0;
+            align-items: center; justify-content: center; font-size: 16px; border-radius: 6px;
+            border: 1px solid rgba(212,175,55,0.3); background: #1a1a1a; color: #d4af37;
+            cursor: pointer; transition: background-color 0.1s ease, color 0.1s ease;
         }
         #mobileSidebarToggle:hover { background: #252525; color: #E8C767; }
         #sidebarBackdrop {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.55);
-            z-index: 45;
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55); z-index: 45;
         }
         @media (max-width: 768px) {
             header { flex-wrap: wrap; row-gap: 0.5rem; padding: 0.5rem 1rem !important; }
             header > div { flex-wrap: wrap; row-gap: 0.5rem; }
             #headerInstituteName { font-size: 1.5rem !important; }
             .user-info-box { padding-left: 0.75rem; margin-left: 0.25rem; min-height: auto; }
-
             #moduleSidebar {
-                position: fixed;
-                top: 0;
-                left: 0;
-                bottom: 0;
-                z-index: 50;
-                width: 78vw !important;
-                max-width: 300px;
-                min-width: 0 !important;
-                transform: translateX(-100%);
-                transition: transform 0.3s ease;
+                position: fixed; top: 0; left: 0; bottom: 0; z-index: 50;
+                width: 78vw !important; max-width: 300px; min-width: 0 !important;
+                transform: translateX(-100%); transition: transform 0.3s ease;
                 padding: 0 !important;
             }
-            #moduleSidebar:not(.sidebar-collapsed) {
-                transform: translateX(0);
-            }
-            #moduleSidebar.sidebar-collapsed {
-                width: 78vw !important;
-                max-width: 300px;
-            }
+            #moduleSidebar:not(.sidebar-collapsed) { transform: translateX(0); }
+            #moduleSidebar.sidebar-collapsed { width: 78vw !important; max-width: 300px; }
             #moduleSidebar:not(.sidebar-collapsed) .sidebar-fade-text,
             #moduleSidebar:not(.sidebar-collapsed) .sidebar-item,
-            #moduleSidebar:not(.sidebar-collapsed) .module-head-group {
-                opacity: 1;
-                pointer-events: auto;
-            }
+            #moduleSidebar:not(.sidebar-collapsed) .module-head-group { opacity: 1; pointer-events: auto; }
             #moduleSidebar:not(.sidebar-collapsed) ~ #sidebarBackdrop,
-            body:has(#moduleSidebar:not(.sidebar-collapsed)) #sidebarBackdrop {
-                display: block;
-            }
+            body:has(#moduleSidebar:not(.sidebar-collapsed)) #sidebarBackdrop { display: block; }
             #sidebarCollapseButton { display: none; }
             #mainContent { padding: 1rem !important; margin-left: 0 !important; }
-
             .branch-selector-stack { max-width: 140px; }
             .branch-selector-stack button.whitespace-nowrap { white-space: normal !important; line-height: 1.25; }
         }
-
         .head-chevron { transition: transform .15s ease; }
         .rotate-180 { transform: rotate(180deg); }
-
-        #moduleGroups .sidebar-item > span:first-child {
-            display: none !important;
-        }
-        #moduleGroups .sidebar-item {
-            justify-content: flex-start !important;
-            gap: 0 !important;
-        }
-
+        #moduleGroups .sidebar-item > span:first-child { display: none !important; }
+        #moduleGroups .sidebar-item { justify-content: flex-start !important; gap: 0 !important; }
         .parallax-search-shell {
-            margin-top: 1rem;
-            padding: 18px;
-            border-radius: 22px;
+            margin-top: 1rem; padding: 18px; border-radius: 22px;
             border: 1px solid rgba(212,175,55,.22);
             background: radial-gradient(circle at 10% 0, rgba(212,175,55,.08), transparent 38%), linear-gradient(145deg, #11100d, #080808);
             box-shadow: 0 24px 60px rgba(0,0,0,.32);
         }
-        .parallax-search-kicker {
-            font-size: 9px;
-            letter-spacing: .2em;
-            color: #8f8567;
-            font-weight: 800;
-            margin-bottom: 10px;
-        }
-        .parallax-search-row {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+        .parallax-search-kicker { font-size: 9px; letter-spacing: .2em; color: #8f8567; font-weight: 800; margin-bottom: 10px; }
+        .parallax-search-row { display: flex; align-items: center; gap: 10px; }
         .parallax-search-row input {
-            flex: 1;
-            background: #060606;
-            border: 1px solid rgba(212,175,55,.25);
-            border-radius: 13px;
-            padding: 13px 14px;
-            color: #eee;
-            outline: none;
+            flex: 1; background: #060606; border: 1px solid rgba(212,175,55,.25);
+            border-radius: 13px; padding: 13px 14px; color: #eee; outline: none;
         }
-        .parallax-search-row input:focus {
-            border-color: #D4AF37;
-        }
+        .parallax-search-row input:focus { border-color: #D4AF37; }
         .parallax-search-row button {
-            background: #c6a64b;
-            color: #080808;
-            border: 0;
-            border-radius: 12px;
-            padding: 12px 18px;
-            font-size: 10px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: .12em;
-            cursor: pointer;
-            transition: background 0.1s ease;
+            background: #c6a64b; color: #080808; border: 0; border-radius: 12px;
+            padding: 12px 18px; font-size: 10px; font-weight: 900;
+            text-transform: uppercase; letter-spacing: .12em;
+            cursor: pointer; transition: background 0.1s ease;
         }
-        .parallax-search-row button:hover {
-            background: #dbb85c;
-        }
-        .parallax-search-results {
-            margin-top: 10px;
-            border-top: 1px solid rgba(255,255,255,.05);
-            padding-top: 8px;
-        }
+        .parallax-search-row button:hover { background: #dbb85c; }
+        .parallax-search-results { margin-top: 10px; border-top: 1px solid rgba(255,255,255,.05); padding-top: 8px; }
         .parallax-search-hit {
-            display: grid;
-            grid-template-columns: 150px 1fr;
-            gap: 5px 14px;
-            width: 100%;
-            text-align: left;
-            padding: 11px 12px;
-            border-radius: 10px;
-            background: #0d0d0d;
-            border: 1px solid transparent;
-            color: #ddd;
-            transition: background 0.1s ease, border-color 0.1s ease;
-            cursor: pointer;
+            display: grid; grid-template-columns: 150px 1fr; gap: 5px 14px;
+            width: 100%; text-align: left; padding: 11px 12px; border-radius: 10px;
+            background: #0d0d0d; border: 1px solid transparent; color: #ddd;
+            transition: background 0.1s ease, border-color 0.1s ease; cursor: pointer;
         }
-        .parallax-search-hit:hover {
-            border-color: rgba(212,175,55,.18);
-            background: #12110e;
-        }
-        .parallax-search-hit span {
-            font-size: 9px;
-            text-transform: uppercase;
-            letter-spacing: .12em;
-            color: #8c815e;
-        }
-        .parallax-search-hit b {
-            font-size: 12px;
-        }
-        .parallax-search-hit small {
-            grid-column: 1/-1;
-            color: #777;
-            font-size: 10px;
-        }
-
-        .branch-selector-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .branch-action-row {
-            display: flex;
-            justify-content: center;
-            gap: 8px;
-        }
-        .branch-action-row .branch-icon-btn {
-            flex: 0 0 auto;
-        }
-
+        .parallax-search-hit:hover { border-color: rgba(212,175,55,.18); background: #12110e; }
+        .parallax-search-hit span { font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: #8c815e; }
+        .parallax-search-hit b { font-size: 12px; }
+        .parallax-search-hit small { grid-column: 1/-1; color: #777; font-size: 10px; }
+        .branch-selector-stack { display: flex; flex-direction: column; gap: 6px; }
+        .branch-action-row { display: flex; justify-content: center; gap: 8px; }
+        .branch-action-row .branch-icon-btn { flex: 0 0 auto; }
         .user-info-box {
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: flex-end;
+            display: flex; flex-direction: column; justify-content: center; align-items: flex-end;
             border-left: 1px solid rgba(212, 175, 55, 0.28);
-            padding-left: 1.5rem;
-            margin-left: 0.5rem;
-            height: 100%;
-            min-height: 60px;
+            padding-left: 1.5rem; margin-left: 0.5rem;
+            height: 100%; min-height: 60px;
         }
-
         #examV2Root .examv2-card,
         #examUpgradeRoot > div {
             border-color: rgba(212,175,55,.18);
@@ -418,33 +246,31 @@
             box-shadow: 0 12px 32px rgba(0,0,0,0.55);
         }
         #examV2Root th, #examUpgradeRoot th {
-            color: #6b7280;
-            text-transform: uppercase;
-            letter-spacing: .08em;
-            font-size: 10px;
-            font-weight: 800;
+            color: #6b7280; text-transform: uppercase;
+            letter-spacing: .08em; font-size: 10px; font-weight: 800;
         }
         #examV2Root td, #examUpgradeRoot td {
-            font-size: 12px;
-            color: #d1d5db;
-            border-bottom: 1px solid #181818;
+            font-size: 12px; color: #d1d5db; border-bottom: 1px solid #181818;
         }
-
         .whatsapp-card {
             background: linear-gradient(160deg, rgba(40, 8, 8, 0.88), rgba(10, 2, 2, 0.96));
             border: 1px solid rgba(212,175,55,.18);
-            border-radius: 16px;
-            padding: 20px;
-            margin-bottom: 20px;
+            border-radius: 16px; padding: 20px; margin-bottom: 20px;
         }
-        .whatsapp-log {
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        .whatsapp-log-item {
-            padding: 8px 12px;
-            border-bottom: 1px solid #1a1a1a;
-            font-size: 12px;
+        .whatsapp-log { max-height: 300px; overflow-y: auto; }
+        .whatsapp-log-item { padding: 8px 12px; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
+
+        /* Journal golden styling */
+        .journal-entry-gold {
+            font-family: 'Cormorant Garamond', serif;
+            font-weight: 600;
+            font-size: 1.2rem;
+            line-height: 1.7;
+            letter-spacing: 0.01em;
+            background: linear-gradient(135deg, #F4E5A1 0%, #E8C767 20%, #BF953F 45%, #8a6a22 60%, #E8C767 80%, #F4E5A1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
     </style>
 </head>
@@ -596,7 +422,7 @@
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Module Access <span class="text-gray-600 normal-case font-normal">(only the boss sees everything)</span></label>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Module Access <span class="text-gray-600 normal-case font-normal">(tick the modules this user should be able to see)</span></label>
                     <div id="newUserModuleGrid" class="grid grid-cols-2 gap-2"></div>
                 </div>
                 <div id="userModalError" class="auth-error"></div>
@@ -612,7 +438,7 @@
                 <button onclick="closeBulkImportModal()" class="text-gray-400 hover:text-white text-lg font-bold">✕</button>
             </div>
             <div class="space-y-4">
-                <p class="text-xs text-gray-400 leading-relaxed">Upload a single <span class="text-yellow-500 font-semibold">.csv</span> file to create many records at once, instead of typing each one in individually. The first row must be a header row with these exact column names:</p>
+                <p class="text-xs text-gray-400 leading-relaxed">Upload a single <span class="text-yellow-500 font-semibold">.csv</span> file to create many records at once. The first row must be a header row with these exact column names:</p>
                 <div id="bulkImportColumns" class="text-xs font-mono bg-[#0c0c0c] border gold-border rounded-xl p-3 text-yellow-500"></div>
                 <input type="file" id="bulkImportFile" accept=".csv" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-2.5 text-xs text-gray-300 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#221c0c] file:text-yellow-500 hover:file:bg-[#332a0f]">
                 <div id="bulkImportError" class="auth-error"></div>
@@ -704,7 +530,7 @@
         </div>
     </div>
 
-    <!-- ============ JAVASCRIPT ============ -->
+    <!-- ============ MAIN JAVASCRIPT ============ -->
     <script>
         // --- Chart.js guard ---
         (function(){
@@ -731,14 +557,60 @@
         let myDesignation = 'Owner';
         let myAllowedModules = [];
         let bulkImportModule = null;
-        const ACCESS_HEADS = ['homepage', 'administrations', 'examination'];
+
+        // ============================================================
+        // NAVIGATION TAXONOMY — 4 parent heads
+        // ============================================================
+        const ACCESS_HEADS = ['homepage', 'administrations', 'examination', 'front_office'];
         const HEAD_MODULES = {
-            homepage: [['analytics', '◈', 'Analytics'], ['assistant', '✦', 'Parallax'], ['students', '🎓', 'Student Department'], ['teachers', '👨‍🏫', 'Teacher Department'], ['classrooms', '🏛️', 'Classroom Department'], ['users', '🔐', 'Manage Users']],
-            administrations: [['attendance', '📋', 'Attendance'], ['syllabus', '📚', 'Syllabus'], ['timetables', '🕒', 'Timetable'], ['fees', '💳', 'Fees'], ['whatsapp', '💬', 'WhatsApp Messaging']],
-            examination: [['seating', '', 'Seating'], ['invigilation', '', 'Invigilation'], ['results', '▣', 'Results'], ['history', '◷', 'History']]
+            homepage: [
+                ['analytics', '◈', 'Analytics'],
+                ['assistant', '✦', 'Parallax'],
+                ['students', '🎓', 'Student Department'],
+                ['teachers', '👨‍🏫', 'Teacher Department'],
+                ['classrooms', '🏛️', 'Classroom Department'],
+                ['journal', '📓', 'Journal'],
+                ['audit_history', '📜', 'Audit History'],
+            ],
+            administrations: [
+                ['attendance', '📋', 'Attendance'],
+                ['syllabus', '📚', 'Syllabus'],
+                ['timetables', '🕒', 'Timetable'],
+                ['whatsapp', '💬', 'WhatsApp Messaging'],
+            ],
+            examination: [
+                ['seating', '🪑', 'Seating'],
+                ['invigilation', '👁️', 'Invigilation'],
+                ['results', '▣', 'Results'],
+                ['history', '◷', 'History'],
+            ],
+            front_office: [
+                ['inquiry', '📞', 'Inquiry & Lead Tracker'],
+                ['fees', '💳', 'Fees'],
+                ['users', '🔐', 'Manage Users'],
+            ],
         };
         const MODULE_HEAD = Object.fromEntries(Object.entries(HEAD_MODULES).flatMap(([h, ms]) => ms.map(([m]) => [m, h])));
-        const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination].map(([m]) => m);
+        const HEAD_LABELS = { homepage: 'Homepage', administrations: 'Administrations', examination: 'Examination', front_office: 'Front Office & Management' };
+        const OWNER_ONLY_MODULES = new Set(['users', 'journal', 'audit_history']);
+        const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination, ...HEAD_MODULES.front_office]
+            .map(([m]) => m).filter(m => !OWNER_ONLY_MODULES.has(m));
+
+        // --- Auto-refresh session so logged-in users stay logged in across browser restarts
+        (function setupSessionRefresh() {
+            const REFRESH_MS = 12 * 60 * 60 * 1000;
+            setInterval(() => {
+                fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+            }, REFRESH_MS);
+            window.addEventListener('focus', () => {
+                fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    fetch('/api/auth/refresh', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+                }
+            });
+        })();
 
         // ----- Utility -----
         function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
@@ -888,10 +760,10 @@
             await refreshCurrentModule();
         }
 
-        // Resume session
+        // Resume session on page load (persistent login)
         (async function tryResumeSession() {
             try {
-                const res = await fetch('/api/auth/me');
+                const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
                 if (res.ok) {
                     const data = await res.json();
                     applyIdentity(data);
@@ -911,30 +783,20 @@
             selector.innerHTML = '';
             branches.forEach(b => {
                 const opt = document.createElement('option');
-                opt.value = b.id;
-                opt.textContent = b.name;
+                opt.value = b.id; opt.textContent = b.name;
                 if (currentBranchId === b.id) opt.selected = true;
                 selector.appendChild(opt);
             });
-            // When there are no branches at all, show a placeholder so the
-            // select isn't a blank control, and make sure we do NOT flip into
-            // "global HQ" mode - that would disable the Add Branch button and
-            // leave the user with no way to create their first branch.
             if (branches.length === 0) {
                 const opt = document.createElement('option');
-                opt.value = '';
-                opt.textContent = '— No branches yet —';
-                opt.disabled = true;
-                opt.selected = true;
+                opt.value = ''; opt.textContent = '— No branches yet —';
+                opt.disabled = true; opt.selected = true;
                 selector.appendChild(opt);
             }
             if (currentBranchId === null && branches.length > 0) {
                 currentBranchId = branches[0].id;
                 selector.value = currentBranchId;
             }
-            // Explicitly require a non-null id before treating 0 as "global".
-            // Number(null) === 0, which is what used to break this after the
-            // last branch was deleted.
             isGlobalView = currentBranchId !== null && currentBranchId !== undefined && Number(currentBranchId) === 0;
             document.body.classList.toggle('global-readonly', isGlobalView);
             const branchButton = document.querySelector('button[onclick="openAddBranchModal()"]');
@@ -959,40 +821,25 @@
             document.getElementById('newBranchName').value = '';
         }
 
-        // Creates a branch and, on success, selects it as the active branch so
-        // the rest of the app has a valid scope to work with immediately.
-        // This was previously referenced by the modal's button but never
-        // defined - the Create Branch button has been non-functional.
         window.createNewBranch = async function() {
             const nameInput = document.getElementById('newBranchName');
             const name = (nameInput.value || '').trim();
             if (!name) { alert('Please enter a branch name.'); return; }
             if (isGlobalView) { alert('Switch out of Centralised HQ view to add a branch.'); return; }
-
             const res = await authFetch('/api/branches', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name })
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-                alert(apiErrorMessage(data.detail, 'Could not create branch.'));
-                return;
-            }
-
+            if (!res.ok) { alert(apiErrorMessage(data.detail, 'Could not create branch.')); return; }
             closeAddBranchModal();
-
-            // Adopt the newly created branch as the active scope. Set it
-            // BEFORE loadBranches so the auto-select-first-branch logic in
-            // loadBranches doesn't pick a different one.
             currentBranchId = data.id;
             isGlobalView = false;
             document.body.classList.remove('global-readonly');
-
             await loadBranches();
             const selector = document.getElementById('branchSelector');
             if (selector) selector.value = String(currentBranchId);
-
             await refreshCurrentModule();
         };
 
@@ -1019,8 +866,6 @@
             const r = await authFetch(`/api/branches/${b.id}`, { method: 'DELETE' });
             const d = await r.json().catch(() => ({}));
             if (!r.ok) return alert(apiErrorMessage(d.detail, 'Could not delete branch.'));
-            // Clear the active scope so loadBranches can pick the next one, or
-            // fall into the "no branches yet" placeholder if this was the last.
             currentBranchId = null;
             await loadBranches();
             refreshCurrentModule();
@@ -1033,14 +878,14 @@
             groups.innerHTML = ACCESS_HEADS.filter(head => {
                 if (isOwner) return true;
                 if (head === 'homepage') return false;
-                return HEAD_MODULES[head].some(([m]) => myAllowedModules.includes(m));
+                return HEAD_MODULES[head].some(([m]) => !OWNER_ONLY_MODULES.has(m) && myAllowedModules.includes(m));
             }).map(head => {
                 const open = false;
                 const children = HEAD_MODULES[head].filter(([m]) => {
-                    if (m === 'users') return isOwner;
+                    if (OWNER_ONLY_MODULES.has(m)) return isOwner;
                     return isOwner || myAllowedModules.includes(m);
                 });
-                const title = head === 'homepage' ? 'Homepage' : head === 'administrations' ? 'Administrations' : 'Examination';
+                const title = HEAD_LABELS[head] || head;
                 return `<div class="mb-1 module-head-group" data-head="${head}">
                     <div class="w-full flex items-center justify-between px-3 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-yellow-500 hover:bg-[#111]">
                         <span class="module-head-title module-head-text flex-1" onclick="switchHead('${head}')">${title}</span>
@@ -1054,6 +899,10 @@
         }
 
         async function switchModule(moduleName, clickedButton = null) {
+            if (!isOwner && OWNER_ONLY_MODULES.has(moduleName)) {
+                alert('That module is restricted to the institute owner.');
+                return;
+            }
             if (!isOwner && !myAllowedModules.includes(moduleName)) {
                 alert('Your account does not have access to that module.');
                 return;
@@ -1069,7 +918,7 @@
         }
 
         function switchHead(head) {
-            if (!isOwner && !HEAD_MODULES[head].some(([m]) => myAllowedModules.includes(m))) return;
+            if (!isOwner && head === 'homepage') return;
             if (head === 'homepage') {
                 currentModule = 'home';
                 document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
@@ -1104,19 +953,10 @@
             const HIDE_THRESHOLD = 8;
             function onScroll() {
                 const top = getTop();
-                if (top <= 4) {
-                    header.classList.remove('header-hidden');
-                    lastTop = top;
-                    return;
-                }
+                if (top <= 4) { header.classList.remove('header-hidden'); lastTop = top; return; }
                 const delta = top - lastTop;
-                if (delta > HIDE_THRESHOLD) {
-                    header.classList.add('header-hidden');
-                    lastTop = top;
-                } else if (delta < -HIDE_THRESHOLD) {
-                    header.classList.remove('header-hidden');
-                    lastTop = top;
-                }
+                if (delta > HIDE_THRESHOLD) { header.classList.add('header-hidden'); lastTop = top; }
+                else if (delta < -HIDE_THRESHOLD) { header.classList.remove('header-hidden'); lastTop = top; }
             }
             window.addEventListener('scroll', onScroll, { passive: true });
             const scroller = document.getElementById('mainContent');
@@ -1132,16 +972,8 @@
             const collapsed = sidebar.classList.contains('sidebar-collapsed');
             const icon = collapsed ? '›' : '‹';
             const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-            if (button) {
-                button.textContent = icon;
-                button.title = label;
-                button.setAttribute('aria-label', label);
-            }
-            if (headerButton) {
-                headerButton.textContent = icon;
-                headerButton.title = label;
-                headerButton.setAttribute('aria-label', label);
-            }
+            if (button) { button.textContent = icon; button.title = label; button.setAttribute('aria-label', label); }
+            if (headerButton) { headerButton.textContent = icon; headerButton.title = label; headerButton.setAttribute('aria-label', label); }
         }
 
         function toggleModuleHead(head, event) {
@@ -1166,14 +998,11 @@
             if (button) button.classList.toggle('rotate-180');
         }
 
-        // ----- refreshCurrentModule (dispatcher) -----
+        // ----- refreshCurrentModule -----
         async function refreshCurrentModule() {
             const container = document.getElementById('mainContent');
             if (!container) return;
 
-            // No branches yet - render a helpful empty state with a direct
-            // button to open the Add Branch modal, instead of trying to render
-            // a module that needs a branch scope and erroring out.
             if (!branches.length) {
                 currentModule = 'home';
                 document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
@@ -1183,16 +1012,13 @@
                             <div class="text-5xl mb-4">🏛️</div>
                             <h2 class="command-heading-font text-3xl sm:text-4xl gold-gradient-text tracking-tight mb-3">No branches yet</h2>
                             <p class="text-sm text-gray-400 max-w-xl mx-auto mb-8 leading-relaxed">
-                                Every institute needs at least one branch (campus, location, or teaching site).
-                                Create your first branch to unlock Students, Teachers, Classrooms, Attendance, Fees,
-                                Timetables, Seating, Results and every other module.
+                                Every institute needs at least one branch. Create your first branch to unlock every module.
                             </p>
                             <button onclick="openAddBranchModal()" class="gold-bg hover:opacity-95 text-black font-extrabold px-8 py-3.5 rounded-xl text-sm uppercase tracking-wider fast-transition shadow-lg">
                                 + Create Your First Branch
                             </button>
                         </div>
-                    </div>
-                `;
+                    </div>`;
                 return;
             }
 
@@ -1223,6 +1049,12 @@
                     await window.renderHistory();
                 } else if (currentModule === 'whatsapp') {
                     await renderWhatsAppModule(container);
+                } else if (currentModule === 'journal') {
+                    await renderJournalModule(container);
+                } else if (currentModule === 'audit_history') {
+                    await renderAuditHistoryModule(container);
+                } else if (currentModule === 'inquiry') {
+                    await renderInquiryModule(container);
                 } else {
                     await renderDataModule(container, currentModule);
                 }
@@ -1232,7 +1064,6 @@
             }
         }
 
-        // ----- Helper: readApiJson -----
         async function readApiJson(res, context = 'Request') {
             const text = await res.text();
             let data = null;
@@ -1244,7 +1075,7 @@
             return data;
         }
 
-        // ----- Analytics module -----
+        // ----- Analytics -----
         async function renderAnalyticsModule(container) {
             const renderToken = Symbol('analytics-render');
             window.__analyticsRenderToken = renderToken;
@@ -1285,7 +1116,6 @@
             const a = d.attendance || {}, f = d.fees || {}, l = d.lectures || {};
             const trend = a.trend || [], batches = a.by_batch || [], days = l.by_day || [];
             const maxDay = Math.max(1, ...days.map(x => x.count || 0));
-            const maxBatch = Math.max(1, ...batches.map(x => x.total || 0));
             const feeTotal = (f.paid_amount || 0) + (f.pending_amount || 0);
             const paidPct = feeTotal ? Math.round((f.paid_amount / feeTotal) * 100) : 0;
 
@@ -1338,17 +1168,58 @@
                     <div class="glass-panel border gold-border p-6 rounded-2xl">
                         <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Lectures · This Week</h3><div class="text-xs text-gray-500">${l.scheduled_this_week || 0} scheduled · ${l.logged_last_7_days || 0} logged</div></div>
                         <div class="space-y-4">${days.map(x => analyticsBar(x.count || 0, maxDay, x.day, `${x.count || 0} lectures`)).join('')}</div>
-                        <p class="text-[10px] text-gray-600 mt-5">"Logged" counts syllabus lecture entries recorded in the last seven days; "scheduled" counts generated timetable slots.</p>
                     </div>
                     <div class="glass-panel border gold-border p-6 rounded-2xl">
                         <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Attendance · By Batch</h3><span class="text-xs text-gray-500">current branch</span></div>
                         <div class="space-y-4">${batches.length ? batches.map(x => analyticsBar(x.present || 0, Math.max(1, x.total || 0), x.batch, `${x.pct || 0}% · ${x.present || 0}/${x.total || 0}`)).join('') : '<p class="text-xs text-gray-500">No attendance data yet.</p>'}</div>
                     </div>
                 </div>
+
+                <div class="glass-panel border gold-border p-6 rounded-2xl">
+                    <div class="flex justify-between items-center mb-5">
+                        <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">⚠ Performance Slump Detector</h3>
+                        <span class="text-xs text-gray-500" id="slumpSummary">Scanning…</span>
+                    </div>
+                    <div id="slumpList" class="space-y-3">
+                        <p class="text-xs text-gray-500">Analysing recent attendance and test-score trends…</p>
+                    </div>
+                </div>
             `;
+            loadSlumpDetector();
         }
 
-        // ----- Home module -----
+        async function loadSlumpDetector() {
+            const list = document.getElementById('slumpList');
+            const summary = document.getElementById('slumpSummary');
+            if (!list || !summary) return;
+            try {
+                const res = await authFetch(`/api/analytics/slumps/${currentBranchId}?days=30`);
+                const data = await readApiJson(res, 'Slump detector');
+                if (!data.slumps || data.slumps.length === 0) {
+                    summary.textContent = 'No anomalies detected';
+                    list.innerHTML = `<p class="text-xs text-green-400">✓ No performance slumps detected in the last ${data.window_days} days.</p>`;
+                    return;
+                }
+                summary.textContent = `${data.count} student(s) flagged`;
+                list.innerHTML = data.slumps.map(s => `
+                    <div class="flex items-start gap-3 bg-[#0c0c0c] border gold-border rounded-xl p-4">
+                        <div class="text-2xl">${s.kind === 'attendance' ? '📉' : '📊'}</div>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-white text-sm">${esc(s.student_name)}</span>
+                                <span class="text-xs font-black text-red-400">−${s.drop}%</span>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-1">${esc(s.note)}</div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                summary.textContent = 'Unavailable';
+                list.innerHTML = `<p class="text-xs text-red-400">${esc(err.message || 'Could not load slump analysis.')}</p>`;
+            }
+        }
+
+        // ----- Home -----
         function renderHomeModule(container) {
             const can = (m) => isOwner || myAllowedModules.includes(m);
             container.innerHTML = `
@@ -1591,7 +1462,7 @@
                     ${columns.map(c => {
                         let val = r[c.key];
                         if (moduleName === 'fees' && c.key === 'amount_inr') { val = `₹${parseFloat(val || 0).toLocaleString('en-IN')}`; }
-                        if (c.key === 'document' && val) { val = `<a href="/uploads/${val}" target="_blank" class="text-yellow-500 underline text-xs font-semibold">View File</a>`; }
+                        if (c.key === 'document' && val) { val = `<a href="/api/uploads/${val}" target="_blank" class="text-yellow-500 underline text-xs font-semibold">View File</a>`; }
                         else if (c.key === 'document' && !val) { val = `<span class="text-gray-600 text-xs">No File</span>`; }
                         return `<td class="p-4 font-medium">${val ?? ''}</td>`;
                     }).join('')}
@@ -1611,7 +1482,7 @@
             await loadModuleRecords('fees');
         }
 
-        // ----- Students (batchwise) -----
+        // ----- Students -----
         let allStudentRecords = [];
 
         async function renderStudentsModule(container) {
@@ -1670,21 +1541,16 @@
         function renderStudentTable() {
             const canWrite = myPermission !== 'read_only' && !isGlobalView;
             const tbody = document.getElementById('studentTableBody');
-            const query = (document.getElementById('studentSearchInput')?.value || '').trim().toLowerCase();
-
             let students = allStudentRecords.slice();
-
             students.sort((a, b) => {
                 const batchA = (a.batch || '').trim(), batchB = (b.batch || '').trim();
                 if (batchA !== batchB) return batchA.localeCompare(batchB);
                 return (a.name || '').localeCompare(b.name || '');
             });
-
             if (students.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-gray-500">No students found.</td></tr>`;
                 return;
             }
-
             let rows = '';
             let lastBatch = null;
             students.forEach(s => {
@@ -1745,13 +1611,9 @@
             ]);
             attendanceAllStudents = await sRes.json();
             attendanceMarksToday = await aRes.json();
-
-            const batches = [...new Set(attendanceAllStudents.map(s => (s.batch || '').trim()).filter(Boolean))]
-                .sort((a, b) => a.localeCompare(b));
+            const batches = [...new Set(attendanceAllStudents.map(s => (s.batch || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
             const select = document.getElementById('attendanceBatchSelect');
-            select.innerHTML = batches.length === 0
-                ? '<option value="">No batches found</option>'
-                : batches.map(b => `<option value="${b}">${b}</option>`).join('');
+            select.innerHTML = batches.length === 0 ? '<option value="">No batches found</option>' : batches.map(b => `<option value="${b}">${b}</option>`).join('');
             renderAttendanceStudentList();
         }
 
@@ -1760,16 +1622,13 @@
             const canWrite = myPermission !== 'read_only' && !isGlobalView;
             const selectedBatch = document.getElementById('attendanceBatchSelect').value;
             const query = document.getElementById('attendanceSearchInput').value.trim().toLowerCase();
-
             let students = attendanceAllStudents.filter(s => (s.batch || '').trim() === selectedBatch);
             if (query) students = students.filter(s => (s.name || '').toLowerCase().includes(query));
             students.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-
             if (students.length === 0) {
                 listEl.innerHTML = `<p class="text-center text-gray-500 text-sm py-8">No students found${selectedBatch ? ` in ${selectedBatch}` : ''}.</p>`;
                 return;
             }
-
             listEl.innerHTML = students.map(s => {
                 const mark = attendanceMarksToday[s.name];
                 const safeName = (s.name || '').replace(/'/g, "\\'");
@@ -1807,12 +1666,8 @@
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Present</div><div class="text-xl font-black text-green-400 mt-1">${data.present_count}</div></div>
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Absent</div><div class="text-xl font-black text-red-400 mt-1">${data.absent_count}</div></div>
                 `;
-                const historyRows = data.history.map(h => ({
-                    date: String(h.date || ''),
-                    status: String(h.status || '')
-                }));
-                body.innerHTML = historyRows.length
-                    ? historyRows.map(h => `
+                body.innerHTML = data.history.length
+                    ? data.history.map(h => `
                         <div class="flex items-center justify-between py-2 border-b border-gray-900">
                             <span class="text-xs text-gray-300">${esc(h.date)}</span>
                             <span class="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full ${h.status === 'Present' ? 'bg-green-600/20 text-green-400' : 'bg-red-600/20 text-red-400'}">${esc(h.status)}</span>
@@ -1857,9 +1712,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ branch_id: currentBranchId, student_name: studentName, date: attendanceToday })
                         });
-                    } catch (e) {
-                        console.warn('WhatsApp absence notification failed:', e);
-                    }
+                    } catch (e) { console.warn('WhatsApp absence notification failed:', e); }
                 }
             } else {
                 alert('Failed to mark attendance.');
@@ -1869,12 +1722,8 @@
         async function deleteRecord(moduleName, recordId) {
             if (!confirm('Remove this record permanently? This cannot be undone.')) return;
             const res = await authFetch(`/api/records/${moduleName}/${recordId}`, { method: 'DELETE' });
-            if (res.ok) {
-                await loadModuleRecords(moduleName);
-            } else {
-                const err = await res.json().catch(() => ({}));
-                alert(apiErrorMessage(err.detail, 'Failed to delete record.'));
-            }
+            if (res.ok) { await loadModuleRecords(moduleName); }
+            else { const err = await res.json().catch(() => ({})); alert(apiErrorMessage(err.detail, 'Failed to delete record.')); }
         }
 
         // ----- Bulk import -----
@@ -1893,11 +1742,9 @@
             errorEl.textContent = '';
             const fileInput = document.getElementById('bulkImportFile');
             if (!fileInput.files[0]) { errorEl.textContent = 'Please choose a CSV file first.'; return; }
-
             const formData = new FormData();
             formData.append('branch_id', currentBranchId);
             formData.append('file', fileInput.files[0]);
-
             const res = await authFetch(`/api/records/${bulkImportModule}/bulk`, { method: 'POST', body: formData });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
@@ -1949,8 +1796,10 @@
         // ----- Users -----
         const MODULE_LABELS = {
             students: 'Students', teachers: 'Teachers', classrooms: 'Classrooms', syllabus: 'Syllabus',
-            attendance: 'Attendance', analytics: 'Analytics', timetables: 'Timetable', seating: 'Seating', invigilation: 'Invigilation', fees: 'Fees', assistant: 'Parallax', whatsapp: 'WhatsApp Messaging',
-            results: 'Results', history: 'History'
+            attendance: 'Attendance', analytics: 'Analytics', timetables: 'Timetable', seating: 'Seating',
+            invigilation: 'Invigilation', fees: 'Fees', assistant: 'Parallax', whatsapp: 'WhatsApp Messaging',
+            results: 'Results', history: 'History', journal: 'Journal', audit_history: 'Audit History',
+            inquiry: 'Inquiry & Lead Tracker', users: 'Manage Users',
         };
 
         let usersCache = [];
@@ -2021,14 +1870,14 @@
             const checked = new Set(Array.isArray(checkedModules) ? checkedModules : []);
             const section = (headKey, label) => `
                 <div class="col-span-2 text-[10px] font-black uppercase tracking-widest text-gray-500 mt-2 first:mt-0">${label}</div>
-                ${HEAD_MODULES[headKey].map(([m, , childLabel]) => `
+                ${HEAD_MODULES[headKey].filter(([m]) => !OWNER_ONLY_MODULES.has(m)).map(([m, , childLabel]) => `
                     <label class="flex items-center space-x-2 text-xs text-gray-300 bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 cursor-pointer">
                         <input type="checkbox" class="module-check newUserModuleCheckbox" value="${m}" ${checked.has(m) ? 'checked' : ''}>
                         <span>${childLabel}</span>
                     </label>
                 `).join('')}
             `;
-            grid.innerHTML = section('administrations', 'Administrations') + section('examination', 'Examination');
+            grid.innerHTML = section('administrations', 'Administrations') + section('examination', 'Examination') + section('front_office', 'Front Office & Management');
         }
 
         function openUserModal(userId) {
@@ -2084,12 +1933,8 @@
                 body: JSON.stringify({ full_name, email, password, permission, designation, modules }),
             });
             const data = await res.json().catch(() => ({}));
-            if (res.ok) {
-                closeUserModal();
-                await loadUsers();
-            } else {
-                errorEl.textContent = apiErrorMessage(data.detail, 'Failed to create user.');
-            }
+            if (res.ok) { closeUserModal(); await loadUsers(); }
+            else { errorEl.textContent = apiErrorMessage(data.detail, 'Failed to create user.'); }
         }
 
         async function changeUserPermission(userId, permission) {
@@ -2107,7 +1952,7 @@
             if (res.ok) { await loadUsers(); } else { alert('Failed to remove user.'); }
         }
 
-        // ----- Parallax (Assistant) -----
+        // ----- Parallax -----
         window.parallaxHistory = window.parallaxHistory || [];
 
         async function renderAssistantModule(container) {
@@ -2141,7 +1986,7 @@
             const thread = document.getElementById('parallaxThread');
             if (!thread) return;
             if (window.parallaxHistory.length === 0) {
-                thread.innerHTML = '<div class="text-gray-500 text-xs">No questions asked yet this session. Try something like "list students with pending fees" or just "attendance today?".</div>';
+                thread.innerHTML = '<div class="text-gray-500 text-xs">No questions asked yet this session.</div>';
                 return;
             }
             thread.innerHTML = window.parallaxHistory.map(turn => `
@@ -2214,7 +2059,6 @@
                             <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Rows</label><input id="seatRows" type="number" min="1" max="100" placeholder="5" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                             <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Columns</label><input id="seatColumns" type="number" min="1" max="100" placeholder="8" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                         </div>
-                        <p class="text-xs text-gray-500 mt-4">Students are pulled from the current branch. The generator spaces batches so orthogonally adjacent seats never contain the same batch.</p>
                         <button onclick="generateSeatingPlan()" class="mt-5 gold-bg hover:opacity-95 text-black font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Generate Seating Plan</button>
                     </div>` : ''}
                     <div id="seatingLayoutsContainer" class="space-y-6"></div>
@@ -2278,7 +2122,7 @@
             renderSavedSeatingLayouts();
         }
 
-        // ----- Timetable (full) -----
+        // ----- Timetable -----
         let ttTeachersData = [];
         let ttSavedConfigs = [];
         const TT_DEFAULT_TIMINGS = [
@@ -2303,9 +2147,7 @@
                 if (!Array.isArray(ttTeachersData) || !Array.isArray(window.ttSavedSlots) || !Array.isArray(ttSavedConfigs)) {
                     throw new Error('Timetable API returned an invalid data shape.');
                 }
-
                 const batchNamesInSlots = [...new Set(window.ttSavedSlots.map(s => s.batch_name))].sort((a, b) => (a || '').localeCompare(b || ''));
-
                 container.innerHTML = `
                     <div class="space-y-8">
                         <div class="flex justify-between items-center flex-wrap gap-3">
@@ -2324,7 +2166,7 @@
                                 <div class="space-y-5">
                                     ${ttSavedConfigs.length > 0 ? `
                                     <div>
-                                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Load Existing Batch <span class="text-gray-600 normal-case font-normal">(to edit & regenerate exactly)</span></label>
+                                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">Load Existing Batch</label>
                                         <select id="ttLoadBatchSelect" onchange="loadTimetableConfig(this.value)" class="w-full max-w-xl bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none relative z-10">
                                             <option value="">— New Batch —</option>
                                             ${ttSavedConfigs.map(c => `<option value="${esc(c.batch_name)}">${esc(c.batch_name)}</option>`).join('')}
@@ -2440,7 +2282,6 @@
             const filterBatch = filterEl ? filterEl.value : '';
             let slots = window.ttSavedSlots || [];
             if (filterBatch) slots = slots.filter(s => s.batch_name === filterBatch);
-
             const dayOrder = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5, Sunday: 6 };
             slots = slots.slice().sort((a, b) => {
                 if (a.batch_name !== b.batch_name) return (a.batch_name || '').localeCompare(b.batch_name || '');
@@ -2448,7 +2289,6 @@
                 if (da !== db) return da - db;
                 return (a.lecture_number || 0) - (b.lecture_number || 0);
             });
-
             if (!slots.length) {
                 tbody.innerHTML = `<tr><td colspan="${canWrite ? 8 : 7}" class="p-6 text-center text-gray-500">No timetable generated yet. Configure and click generate.</td></tr>`;
                 return;
@@ -2484,7 +2324,6 @@
             if (isGlobalView) return;
             const batchName = document.getElementById('ttBatchName').value.trim();
             if (!batchName) { alert('Enter a batch name.'); return; }
-
             const timings = [];
             document.querySelectorAll('#ttTimingRows [data-timing-row]').forEach(row => {
                 const lecture_number = parseInt(row.querySelector('.tt-lecture-num').value, 10) || 0;
@@ -2492,7 +2331,6 @@
                 if (time_slot) timings.push({ lecture_number, time_slot });
             });
             if (!timings.length) { alert('Add at least one lecture timing.'); return; }
-
             const teachers_config = [];
             document.querySelectorAll('#teacherConfigList > div').forEach((el, idx) => {
                 const name = el.getAttribute('data-teacher');
@@ -2501,19 +2339,16 @@
                 const unavailable_days = document.getElementById(`unav_${idx}`).value.split(',').map(s => s.trim()).filter(Boolean);
                 teachers_config.push({ name, subject, lectures_per_week, unavailable_days });
             });
-
-            if (!confirm(`This erases any existing timetable for "${batchName}" and rebuilds it fresh from these settings - it never stacks on top of a prior run. Continue?`)) return;
-
+            if (!confirm(`This erases any existing timetable for "${batchName}" and rebuilds it fresh. Continue?`)) return;
             const res = await authFetch('/api/timetable/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ branch_id: currentBranchId, batch_name: batchName, teachers_config, timings }),
             });
-
             if (res.ok) {
                 const result = await res.json();
                 let msg = `Timetable for "${batchName}" generated and saved.`;
-                if (result.warnings && result.warnings.length > 0) msg += '\\n\\nHeads up:\\n' + result.warnings.join('\\n');
+                if (result.warnings && result.warnings.length > 0) msg += '\n\nHeads up:\n' + result.warnings.join('\n');
                 alert(msg);
                 refreshCurrentModule();
             } else {
@@ -2551,12 +2386,8 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
-            if (res.ok) {
-                closeTimetableSlotEdit();
-                refreshCurrentModule();
-            } else {
-                alert('Failed to update slot.');
-            }
+            if (res.ok) { closeTimetableSlotEdit(); refreshCurrentModule(); }
+            else { alert('Failed to update slot.'); }
         }
 
         // ----- Record modal -----
@@ -2567,9 +2398,7 @@
             document.getElementById('recordSubmitBtn').textContent = isEdit ? 'Save Changes' : 'Save Record';
             document.getElementById('recordFormError').textContent = '';
             const fieldsContainer = document.getElementById('modalFields');
-
             const existing = isEdit ? (moduleRecordsCache[moduleName] || []).find(r => r.id === recordId) : null;
-
             let fieldsConfig = [];
             if (moduleName === 'students') {
                 fieldsConfig = [
@@ -2617,14 +2446,12 @@
                     { id: 'due_date', label: 'Due Date', type: 'text', placeholder: '2026-09-30' }
                 ];
             }
-
             fieldsContainer.innerHTML = fieldsConfig.map(f => `
                 <div>
                     <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">${f.label}</label>
                     <input type="${f.type}" id="field_${f.id}" required placeholder="${f.placeholder}" value="${existing && existing[f.id] !== undefined && existing[f.id] !== null ? esc(existing[f.id]) : ''}" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 gold-border-glow focus:outline-none">
                 </div>
             `).join('');
-
             window.activeModalModule = moduleName;
             window.activeModalRecordId = isEdit ? recordId : null;
         }
@@ -2640,19 +2467,14 @@
             const inputs = document.getElementById('modalFields').querySelectorAll('input');
             const data = {};
             inputs.forEach(input => { const key = input.id.replace('field_', ''); data[key] = input.type === 'number' ? parseFloat(input.value) : input.value; });
-
             const formData = new FormData();
             if (!recordId) formData.append('branch_id', currentBranchId);
             formData.append('data_json', JSON.stringify(data));
-
             const url = recordId ? `/api/records/${moduleName}/${recordId}` : `/api/records/${moduleName}`;
             const method = recordId ? 'PATCH' : 'POST';
             const res = await authFetch(url, { method, body: formData });
-
-            if (res.ok) {
-                closeRecordModal();
-                await loadModuleRecords(moduleName);
-            } else {
+            if (res.ok) { closeRecordModal(); await loadModuleRecords(moduleName); }
+            else {
                 const errData = await res.json().catch(() => ({}));
                 errorEl.textContent = apiErrorMessage(errData.detail, 'Failed to save record.');
             }
@@ -2690,9 +2512,8 @@
         function renderCentralAnalyticsContent(d) {
             const el = document.getElementById('centralAnalyticsContent');
             if (!el) return;
-            const a = d.attendance || {}, f = d.fees || {}, l = d.lectures || {};
+            const a = d.attendance || {}, f = d.fees || {};
             const trend = a.trend || [], batches = a.by_batch || [], revenue = (f.revenue || []).slice().reverse();
-
             el.innerHTML = `
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     ${centralStatCard('Students', d.students_total)}
@@ -2715,59 +2536,36 @@
                     </div>
                 </div>
             `;
-
             const goldLine = '#d4af37';
             if (!window.Chart) {
                 const error = document.getElementById('centralAnalyticsError');
                 if (error) error.textContent = 'Analytics charts are unavailable because Chart.js did not load.';
                 return;
             }
-
             const gridColor = 'rgba(212,175,55,0.12)';
             const tickColor = '#9ca3af';
-
             const attendanceCtx = document.getElementById('centralAttendanceChart');
             if (attendanceCtx && window.Chart) {
                 window.__centralAnalyticsCharts.push(new window.IBEXChart(attendanceCtx, {
                     type: 'line',
-                    data: {
-                        labels: trend.map(t => t.label),
-                        datasets: [{ label: 'Present %', data: trend.map(t => t.pct), borderColor: goldLine, backgroundColor: 'rgba(212,175,55,0.15)', tension: 0.35, fill: true }]
-                    },
-                    options: {
-                        plugins: { legend: { labels: { color: tickColor } } },
-                        scales: { x: { ticks: { color: tickColor }, grid: { color: gridColor } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } }
-                    }
+                    data: { labels: trend.map(t => t.label), datasets: [{ label: 'Present %', data: trend.map(t => t.pct), borderColor: goldLine, backgroundColor: 'rgba(212,175,55,0.15)', tension: 0.35, fill: true }] },
+                    options: { plugins: { legend: { labels: { color: tickColor } } }, scales: { x: { ticks: { color: tickColor }, grid: { color: gridColor } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } } }
                 }));
             }
-
             const batchCtx = document.getElementById('centralBatchChart');
             if (batchCtx && window.Chart) {
                 window.__centralAnalyticsCharts.push(new window.IBEXChart(batchCtx, {
                     type: 'bar',
-                    data: {
-                        labels: batches.map(b => b.batch),
-                        datasets: [{ label: 'Attendance %', data: batches.map(b => b.pct), backgroundColor: goldLine }]
-                    },
-                    options: {
-                        plugins: { legend: { display: false } },
-                        scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } }
-                    }
+                    data: { labels: batches.map(b => b.batch), datasets: [{ label: 'Attendance %', data: batches.map(b => b.pct), backgroundColor: goldLine }] },
+                    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } } }
                 }));
             }
-
             const revenueCtx = document.getElementById('centralRevenueChart');
             if (revenueCtx && window.Chart) {
                 window.__centralAnalyticsCharts.push(new window.IBEXChart(revenueCtx, {
                     type: 'bar',
-                    data: {
-                        labels: revenue.map(r => r.date),
-                        datasets: [{ label: 'Revenue (₹)', data: revenue.map(r => r.amount), backgroundColor: 'rgba(212,175,55,0.65)' }]
-                    },
-                    options: {
-                        plugins: { legend: { display: false } },
-                        scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor } } }
-                    }
+                    data: { labels: revenue.map(r => r.date), datasets: [{ label: 'Revenue (₹)', data: revenue.map(r => r.amount), backgroundColor: 'rgba(212,175,55,0.65)' }] },
+                    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor } } } }
                 }));
             }
         }
@@ -2776,7 +2574,7 @@
             return `<div class="glass-panel border gold-border rounded-2xl p-5"><div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold">${esc(label)}</div><div class="text-3xl font-black gold-gradient-text mt-1">${esc(value)}</div></div>`;
         }
 
-        // ===== WhatsApp Module =====
+        // ===== WhatsApp =====
         async function renderWhatsAppModule(container) {
             const canWrite = myPermission !== 'read_only' && !isGlobalView;
             container.innerHTML = `
@@ -2790,6 +2588,18 @@
                         <p class="text-xs text-gray-400 mt-1">Send WhatsApp reminders to parents whose fee due date is within 7 days.</p>
                         ${canWrite ? `<button onclick="sendFeeReminders()" class="mt-3 gold-bg hover:opacity-95 text-black font-extrabold px-4 py-2 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Send Reminders Now</button>` : '<p class="text-xs text-gray-500 mt-2">You have read-only access.</p>'}
                         <div id="feeReminderResult" class="mt-3 text-xs text-gray-400"></div>
+                    </div>
+                    <div class="whatsapp-card">
+                        <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">📢 Broadcast Noticeboard</h3>
+                        <p class="text-xs text-gray-400 mt-1">Send an emergency alert to every parent in this branch. Leave batch blank to send to everyone.</p>
+                        <div class="grid md:grid-cols-[1fr_200px] gap-3 mt-3">
+                            <textarea id="broadcastMessage" rows="3" placeholder="e.g. Institute will remain closed tomorrow due to heavy rain." class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></textarea>
+                            <div class="space-y-2">
+                                <input id="broadcastBatch" type="text" placeholder="Batch (optional)" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-xs text-gray-200 focus:outline-none">
+                                ${canWrite ? `<button onclick="sendBroadcast()" class="w-full gold-bg hover:opacity-95 text-black font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Broadcast Now</button>` : ''}
+                            </div>
+                        </div>
+                        <div id="broadcastResult" class="mt-3 text-xs text-gray-400"></div>
                     </div>
                     <div class="whatsapp-card">
                         <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Message Log</h3>
@@ -2812,14 +2622,288 @@
                     body: JSON.stringify({ branch_id: currentBranchId })
                 });
                 const data = await res.json();
-                if (res.ok) {
-                    resultDiv.textContent = `Sent ${data.sent || 0} reminders.`;
-                } else {
-                    resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to send reminders.');
-                }
-            } catch (e) {
-                resultDiv.textContent = 'Error sending reminders.';
+                if (res.ok) { resultDiv.textContent = `Sent ${data.sent || 0} reminders.`; }
+                else { resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to send reminders.'); }
+            } catch (e) { resultDiv.textContent = 'Error sending reminders.'; }
+        }
+
+        async function sendBroadcast() {
+            const msgEl = document.getElementById('broadcastMessage');
+            const batchEl = document.getElementById('broadcastBatch');
+            const resultDiv = document.getElementById('broadcastResult');
+            const message = (msgEl.value || '').trim();
+            if (!message) { resultDiv.textContent = 'Write a message first.'; return; }
+            if (!confirm('Send this WhatsApp broadcast to all matching parents?')) return;
+            resultDiv.textContent = 'Broadcasting…';
+            try {
+                const res = await authFetch('/api/whatsapp/broadcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ branch_id: currentBranchId, message, batch: (batchEl.value || '').trim() || null })
+                });
+                const data = await res.json();
+                if (res.ok) { resultDiv.textContent = `Sent to ${data.sent || 0} parent(s).`; msgEl.value = ''; }
+                else { resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to broadcast.'); }
+            } catch (e) { resultDiv.textContent = 'Error broadcasting.'; }
+        }
+
+        // ===== Journal =====
+        async function renderJournalModule(container) {
+            if (!isOwner) {
+                container.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-gray-400">Only the institute owner can access the Journal.</div>`;
+                return;
             }
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4">
+                        <div>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Director's Journal</h2>
+                            <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Private reflections · auto-stamped</p>
+                        </div>
+                        <button onclick="openJournalComposer()" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add Entry</button>
+                    </div>
+                    <div id="journalComposer" class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl hidden">
+                        <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">New Entry</label>
+                        <textarea id="journalComposerText" rows="5" placeholder="Write your thoughts…" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 gold-border-glow focus:outline-none"></textarea>
+                        <div class="flex justify-end gap-3 pt-4">
+                            <button onclick="closeJournalComposer()" class="px-5 py-2.5 text-xs font-bold uppercase bg-gray-900 hover:bg-gray-800 text-gray-300 rounded-xl">Cancel</button>
+                            <button onclick="submitJournalEntry()" class="px-6 py-2.5 text-xs font-extrabold uppercase gold-bg hover:opacity-95 text-black rounded-xl shadow-lg">Save Entry</button>
+                        </div>
+                    </div>
+                    <div id="journalList" class="space-y-4">
+                        <div class="glass-panel border gold-border p-8 rounded-2xl text-center text-gray-500">Loading journal…</div>
+                    </div>
+                </div>
+            `;
+            await loadJournalEntries();
+        }
+
+        async function loadJournalEntries() {
+            const list = document.getElementById('journalList');
+            if (!list) return;
+            try {
+                const res = await authFetch('/api/journal');
+                const entries = await readApiJson(res, 'Journal');
+                if (!entries.length) {
+                    list.innerHTML = `<div class="glass-panel border gold-border p-8 rounded-2xl text-center text-gray-500">No entries yet. Click "+ Add Entry" to begin your journal.</div>`;
+                    return;
+                }
+                list.innerHTML = entries.map(e => `
+                    <div class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl">
+                        <div class="flex justify-between items-start gap-4">
+                            <div class="text-[11px] uppercase tracking-widest text-gray-500 font-bold">
+                                ${esc(new Date(e.created_at).toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'short' }))}
+                            </div>
+                            <button onclick="deleteJournalEntry(${e.id})" title="Delete entry" class="row-delete-btn text-lg leading-none">🗑</button>
+                        </div>
+                        <div class="mt-4 journal-entry-gold whitespace-pre-wrap">${esc(e.content)}</div>
+                        <div class="mt-3 text-[10px] uppercase tracking-widest text-gray-600">— ${esc(e.author_name || 'Director')}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                list.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-red-400">${esc(err.message || 'Could not load journal.')}</div>`;
+            }
+        }
+
+        function openJournalComposer() {
+            const c = document.getElementById('journalComposer');
+            c.classList.remove('hidden');
+            document.getElementById('journalComposerText').focus();
+        }
+        function closeJournalComposer() {
+            document.getElementById('journalComposer').classList.add('hidden');
+            document.getElementById('journalComposerText').value = '';
+        }
+
+        async function submitJournalEntry() {
+            const textarea = document.getElementById('journalComposerText');
+            const content = (textarea.value || '').trim();
+            if (!content) { alert('Write something before saving.'); return; }
+            const res = await authFetch('/api/journal', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content, branch_id: currentBranchId || null }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) { alert(apiErrorMessage(data.detail, 'Failed to save entry.')); return; }
+            closeJournalComposer();
+            await loadJournalEntries();
+        }
+
+        async function deleteJournalEntry(id) {
+            if (!confirm('Delete this journal entry permanently?')) return;
+            const res = await authFetch(`/api/journal/${id}`, { method: 'DELETE' });
+            if (!res.ok) { alert('Failed to delete entry.'); return; }
+            await loadJournalEntries();
+        }
+
+        // ===== Audit History =====
+        const AUDIT_ACTION_LABELS = {
+            CREATE_BRANCH: 'created a branch',
+            UPDATE_INSTITUTE: 'renamed the institute',
+            CREATE_USER: 'added a staff user',
+            UPDATE_USER: 'updated a staff user',
+            DELETE_USER: 'removed a staff user',
+            CREATE_INSTITUTE: 'created the institute account',
+            CREATE_SESSION: 'signed in',
+            EXPIRE_SESSION: 'had a session expire',
+            LOGOUT_SESSION: 'signed out',
+            MARK_ATTENDANCE: 'marked attendance',
+            GENERATE_TIMETABLE: 'generated a timetable',
+            DELETE_TIMETABLES: 'deleted all timetables',
+            UPDATE_TIMETABLE_SLOT: 'edited a timetable slot',
+            GENERATE_SEATING: 'generated a seating plan',
+            DELETE_SEATING: 'deleted a seating plan',
+            FEE_MARK_PAID: 'marked a fee as paid',
+            WHATSAPP_ABSENCE: 'sent a WhatsApp absence alert',
+            WHATSAPP_FEE_REMINDERS: 'sent WhatsApp fee reminders',
+            WHATSAPP_BROADCAST: 'broadcast a WhatsApp notice',
+            PARALLAX_QUERY: 'asked Parallax a question',
+            CREATE_JOURNAL: 'added a journal entry',
+            DELETE_JOURNAL: 'deleted a journal entry',
+            CREATE_INQUIRY: 'logged a new inquiry',
+            UPDATE_INQUIRY: 'updated an inquiry',
+            DELETE_INQUIRY: 'deleted an inquiry',
+        };
+
+        function describeAudit(row) {
+            const who = row.user_name || 'System';
+            const verb = AUDIT_ACTION_LABELS[row.action_type] || row.action_type.replace(/_/g, ' ').toLowerCase();
+            const payload = row.payload || {};
+            const after = payload.after || {};
+            const before = payload.before || {};
+            let extra = '';
+            if (after.name && !before.name) extra = ` — ${after.name}`;
+            else if (after.institute_name && !before.institute_name) extra = ` — ${after.institute_name}`;
+            else if (after.student_name) extra = ` — ${after.student_name} (${after.status || ''})`;
+            else if (after.id && row.action_type === 'CREATE_JOURNAL') extra = ` — entry #${after.id}`;
+            return `${who} ${verb}${extra}`;
+        }
+
+        async function renderAuditHistoryModule(container) {
+            if (!isOwner) {
+                container.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-gray-400">Audit History is restricted to the institute owner.</div>`;
+                return;
+            }
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-end flex-wrap gap-3">
+                        <div>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Audit History</h2>
+                            <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Every recorded change in this institute</p>
+                        </div>
+                        <button onclick="refreshCurrentModule()" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider fast-transition">Refresh</button>
+                    </div>
+                    <div class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl">
+                        <div id="auditLogBody" class="space-y-2 max-h-[70vh] overflow-y-auto pr-2">
+                            <div class="text-xs text-gray-500 text-center py-6">Loading audit history…</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            try {
+                const res = await authFetch('/api/audit-log?limit=300');
+                const data = await readApiJson(res, 'Audit history');
+                const entries = data.entries || [];
+                const body = document.getElementById('auditLogBody');
+                if (!entries.length) {
+                    body.innerHTML = `<div class="text-xs text-gray-500 text-center py-6">No activity recorded yet.</div>`;
+                    return;
+                }
+                body.innerHTML = entries.map(e => `
+                    <div class="flex items-start gap-4 py-3 border-b border-gray-900">
+                        <div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold w-44 shrink-0">${esc(new Date(e.timestamp).toLocaleString('en-IN'))}</div>
+                        <div class="flex-1 text-sm text-gray-200">${esc(describeAudit(e))}</div>
+                        <div class="text-[10px] uppercase tracking-widest text-gray-600 shrink-0">${esc(e.branch_name || '')}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                document.getElementById('auditLogBody').innerHTML = `<div class="text-xs text-red-400 text-center py-6">${esc(err.message || 'Could not load audit history.')}</div>`;
+            }
+        }
+
+        // ===== Inquiry & Lead Tracker =====
+        async function renderInquiryModule(container) {
+            const canWrite = myPermission !== 'read_only' && !isGlobalView;
+            container.innerHTML = `
+                <div class="space-y-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4">
+                        <div>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Inquiry & Lead Tracker</h2>
+                            <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Prospective walk-ins & follow-ups</p>
+                        </div>
+                        ${canWrite ? `<button onclick="openInquiryModal()" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider shadow-lg">+ Log Inquiry</button>` : ''}
+                    </div>
+                    <div class="glass-panel border gold-border rounded-2xl p-6 overflow-x-auto shadow-2xl">
+                        <table class="w-full text-left text-sm text-gray-300">
+                            <thead class="bg-[#121212] text-xs uppercase gold-gradient-text border-b gold-border">
+                                <tr>
+                                    <th class="p-3">Name</th><th class="p-3">Phone</th><th class="p-3">Interested In</th>
+                                    <th class="p-3">Source</th><th class="p-3">Status</th><th class="p-3">Follow-up</th>${canWrite ? '<th class="p-3"></th>' : ''}
+                                </tr>
+                            </thead>
+                            <tbody id="inquiryTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            await loadInquiries();
+        }
+
+        async function loadInquiries() {
+            const tbody = document.getElementById('inquiryTableBody');
+            if (!tbody) return;
+            try {
+                const res = await authFetch(`/api/inquiries/${currentBranchId}`);
+                const rows = await readApiJson(res, 'Inquiries');
+                if (!rows.length) {
+                    tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-gray-500">No inquiries logged yet.</td></tr>`;
+                    return;
+                }
+                const canWrite = myPermission !== 'read_only' && !isGlobalView;
+                tbody.innerHTML = rows.map(r => `
+                    <tr class="border-b border-gray-900 hover:bg-[#121212]">
+                        <td class="p-3 font-medium">${esc(r.name || '')}</td>
+                        <td class="p-3">${esc(r.phone || '')}</td>
+                        <td class="p-3">${esc(r.interested_in || '')}</td>
+                        <td class="p-3 text-xs text-gray-400">${esc(r.source || '')}</td>
+                        <td class="p-3"><span class="perm-badge perm-readonly">${esc(r.status || 'New')}</span></td>
+                        <td class="p-3 text-xs">${esc(r.follow_up_date || '')}</td>
+                        ${canWrite ? `<td class="p-3 text-right"><button onclick="deleteInquiry(${r.id})" class="row-delete-btn text-lg leading-none">🗑</button></td>` : ''}
+                    </tr>
+                `).join('');
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-400">${esc(err.message || 'Failed to load inquiries.')}</td></tr>`;
+            }
+        }
+
+        function openInquiryModal() {
+            const name = prompt('Prospect name:');
+            if (!name) return;
+            const phone = prompt('Phone (with country code, optional):') || '';
+            const interested_in = prompt('Interested in (e.g. JEE 2026, NEET):') || '';
+            const source = prompt('Source (Walk-in / Referral / Ad / Other):') || 'Walk-in';
+            const follow_up_date = prompt('Follow-up date (YYYY-MM-DD, optional):') || '';
+            if (!name.trim()) return;
+            authFetch(`/api/inquiries/${currentBranchId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim(), phone, interested_in, source, follow_up_date, status: 'New' }),
+            }).then(async res => {
+                if (!res.ok) {
+                    const d = await res.json().catch(() => ({}));
+                    alert(apiErrorMessage(d.detail, 'Failed to log inquiry.'));
+                    return;
+                }
+                await loadInquiries();
+            });
+        }
+
+        async function deleteInquiry(id) {
+            if (!confirm('Delete this inquiry?')) return;
+            const res = await authFetch(`/api/inquiries/${id}`, { method: 'DELETE' });
+            if (!res.ok) { alert('Failed to delete.'); return; }
+            await loadInquiries();
         }
 
         // ===== Exam Results & History (global) =====
@@ -2839,7 +2923,7 @@
             }
         };
 
-        // ---- Delete Parallax history (runtime) ----
+        // ---- Delete Parallax history ----
         const oldParallaxThread = renderParallaxThread;
         renderParallaxThread = function() {
             oldParallaxThread();
@@ -2863,12 +2947,11 @@
             }
         };
 
-        console.log('I.B.E.X. fully loaded – all modules fixed.');
+        console.log('I.B.E.X. fully loaded – 4-head nav, journal, audit history, slump detector.');
     </script>
 
     <!-- Embedded exam results/history scripts -->
     <script>
-        // === EXAM RESULTS / HISTORY UPGRADE ===
         (() => {
           const HEAD = 'examination';
           const MODULES = { results: 'Results', history: 'History' };
