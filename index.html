@@ -916,25 +916,85 @@
                 if (currentBranchId === b.id) opt.selected = true;
                 selector.appendChild(opt);
             });
+            // When there are no branches at all, show a placeholder so the
+            // select isn't a blank control, and make sure we do NOT flip into
+            // "global HQ" mode - that would disable the Add Branch button and
+            // leave the user with no way to create their first branch.
+            if (branches.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = '— No branches yet —';
+                opt.disabled = true;
+                opt.selected = true;
+                selector.appendChild(opt);
+            }
             if (currentBranchId === null && branches.length > 0) {
                 currentBranchId = branches[0].id;
                 selector.value = currentBranchId;
             }
-            isGlobalView = Number(currentBranchId) === 0;
+            // Explicitly require a non-null id before treating 0 as "global".
+            // Number(null) === 0, which is what used to break this after the
+            // last branch was deleted.
+            isGlobalView = currentBranchId !== null && currentBranchId !== undefined && Number(currentBranchId) === 0;
             document.body.classList.toggle('global-readonly', isGlobalView);
             const branchButton = document.querySelector('button[onclick="openAddBranchModal()"]');
             if (branchButton) { branchButton.disabled = isGlobalView; branchButton.classList.toggle('opacity-40', isGlobalView); }
         }
 
         document.getElementById('branchSelector').addEventListener('change', (e) => {
+            if (!e.target.value) return;
             currentBranchId = parseInt(e.target.value, 10);
-            isGlobalView = currentBranchId === 0;
+            isGlobalView = Number(currentBranchId) === 0;
             document.body.classList.toggle('global-readonly', isGlobalView);
             refreshCurrentModule();
         });
 
-        function openAddBranchModal() { if (isGlobalView) return; document.getElementById('branchModal').classList.remove('hidden'); }
-        function closeAddBranchModal() { document.getElementById('branchModal').classList.add('hidden'); document.getElementById('newBranchName').value = ''; }
+        function openAddBranchModal() {
+            if (isGlobalView) return;
+            document.getElementById('newBranchName').value = '';
+            document.getElementById('branchModal').classList.remove('hidden');
+        }
+        function closeAddBranchModal() {
+            document.getElementById('branchModal').classList.add('hidden');
+            document.getElementById('newBranchName').value = '';
+        }
+
+        // Creates a branch and, on success, selects it as the active branch so
+        // the rest of the app has a valid scope to work with immediately.
+        // This was previously referenced by the modal's button but never
+        // defined - the Create Branch button has been non-functional.
+        window.createNewBranch = async function() {
+            const nameInput = document.getElementById('newBranchName');
+            const name = (nameInput.value || '').trim();
+            if (!name) { alert('Please enter a branch name.'); return; }
+            if (isGlobalView) { alert('Switch out of Centralised HQ view to add a branch.'); return; }
+
+            const res = await authFetch('/api/branches', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                alert(apiErrorMessage(data.detail, 'Could not create branch.'));
+                return;
+            }
+
+            closeAddBranchModal();
+
+            // Adopt the newly created branch as the active scope. Set it
+            // BEFORE loadBranches so the auto-select-first-branch logic in
+            // loadBranches doesn't pick a different one.
+            currentBranchId = data.id;
+            isGlobalView = false;
+            document.body.classList.remove('global-readonly');
+
+            await loadBranches();
+            const selector = document.getElementById('branchSelector');
+            if (selector) selector.value = String(currentBranchId);
+
+            await refreshCurrentModule();
+        };
 
         window.editBranchRuntime = async function() {
             const b = branches.find(x => Number(x.id) === Number(currentBranchId));
@@ -959,6 +1019,8 @@
             const r = await authFetch(`/api/branches/${b.id}`, { method: 'DELETE' });
             const d = await r.json().catch(() => ({}));
             if (!r.ok) return alert(apiErrorMessage(d.detail, 'Could not delete branch.'));
+            // Clear the active scope so loadBranches can pick the next one, or
+            // fall into the "no branches yet" placeholder if this was the last.
             currentBranchId = null;
             await loadBranches();
             refreshCurrentModule();
@@ -1108,6 +1170,32 @@
         async function refreshCurrentModule() {
             const container = document.getElementById('mainContent');
             if (!container) return;
+
+            // No branches yet - render a helpful empty state with a direct
+            // button to open the Add Branch modal, instead of trying to render
+            // a module that needs a branch scope and erroring out.
+            if (!branches.length) {
+                currentModule = 'home';
+                document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
+                container.innerHTML = `
+                    <div class="space-y-8">
+                        <div class="glass-panel border gold-border p-10 rounded-3xl text-center shadow-2xl">
+                            <div class="text-5xl mb-4">🏛️</div>
+                            <h2 class="command-heading-font text-3xl sm:text-4xl gold-gradient-text tracking-tight mb-3">No branches yet</h2>
+                            <p class="text-sm text-gray-400 max-w-xl mx-auto mb-8 leading-relaxed">
+                                Every institute needs at least one branch (campus, location, or teaching site).
+                                Create your first branch to unlock Students, Teachers, Classrooms, Attendance, Fees,
+                                Timetables, Seating, Results and every other module.
+                            </p>
+                            <button onclick="openAddBranchModal()" class="gold-bg hover:opacity-95 text-black font-extrabold px-8 py-3.5 rounded-xl text-sm uppercase tracking-wider fast-transition shadow-lg">
+                                + Create Your First Branch
+                            </button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
             try {
                 if (currentModule === 'home') {
                     await renderHomeModule(container);
