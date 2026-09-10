@@ -136,8 +136,8 @@
         }
         .fast-transition:active { transform: scale(0.97); }
         .branch-icon-btn {
-            width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-            font-size: 14px; line-height: 1; border-radius: 6px; background: #1a1a1a;
+            width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+            font-size: 12px; line-height: 1; border-radius: 6px; background: #1a1a1a;
             border: 1px solid rgba(212,175,55,0.3); color: #d4af37;
             transition: background-color 0.1s ease, color 0.1s ease;
             will-change: background, color;
@@ -192,8 +192,8 @@
             body:has(#moduleSidebar:not(.sidebar-collapsed)) #sidebarBackdrop { display: block; }
             #sidebarCollapseButton { display: none; }
             #mainContent { padding: 1rem !important; margin-left: 0 !important; }
-            .branch-selector-stack { max-width: 140px; }
-            .branch-selector-stack button.whitespace-nowrap { white-space: normal !important; line-height: 1.25; }
+            .branch-selector-stack { flex-wrap: wrap !important; }
+            .branch-selector-stack #branchSelector { min-width: 90px; max-width: 130px; }
         }
         .head-chevron { transition: transform .15s ease; }
         .rotate-180 { transform: rotate(180deg); }
@@ -230,9 +230,29 @@
         .parallax-search-hit span { font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: #8c815e; }
         .parallax-search-hit b { font-size: 12px; }
         .parallax-search-hit small { grid-column: 1/-1; color: #777; font-size: 10px; }
-        .branch-selector-stack { display: flex; flex-direction: column; gap: 6px; }
-        .branch-action-row { display: flex; justify-content: center; gap: 8px; }
+
+        /* --- Branch selector: short & wide, horizontal layout --- */
+        .branch-selector-stack {
+            display: flex; flex-direction: row; align-items: center;
+            gap: 8px; flex-wrap: nowrap;
+            padding: 0.3rem 0.55rem !important;
+            min-height: 34px;
+        }
+        .branch-selector-stack #branchSelector {
+            min-width: 130px; max-width: 200px;
+            padding: 3px 4px;
+        }
+        .branch-action-row {
+            display: flex; justify-content: center; gap: 4px;
+            flex-direction: row; flex: 0 0 auto;
+        }
         .branch-action-row .branch-icon-btn { flex: 0 0 auto; }
+        .branch-selector-stack .branch-central-analytics-btn {
+            padding: 4px 10px !important;
+            line-height: 1.1;
+            flex: 0 0 auto;
+        }
+
         .user-info-box {
             display: flex; flex-direction: column; justify-content: center; align-items: flex-end;
             border-left: 1px solid rgba(212, 175, 55, 0.28);
@@ -344,14 +364,14 @@
                 </div>
             </div>
             <div class="flex items-center space-x-4">
-                <div class="bg-[#121212] px-3 py-2 rounded-lg border gold-border branch-selector-stack">
-                    <select id="branchSelector" aria-label="Branch selector" class="bg-transparent text-xs font-semibold gold-gradient-text focus:outline-none cursor-pointer w-full"></select>
+                <div class="bg-[#121212] rounded-lg border gold-border branch-selector-stack">
+                    <select id="branchSelector" aria-label="Branch selector" class="bg-transparent text-xs font-semibold gold-gradient-text focus:outline-none cursor-pointer"></select>
                     <div class="branch-action-row">
                         <button onclick="openAddBranchModal()" title="Add branch" aria-label="Add branch" class="branch-icon-btn">+</button>
                         <button onclick="window.editBranchRuntime()" title="Edit branch" aria-label="Edit branch" class="branch-icon-btn">✎</button>
                         <button onclick="window.deleteBranchRuntime()" title="Delete branch" aria-label="Delete branch" class="branch-icon-btn">🗑</button>
                     </div>
-                    <button onclick="openCentralAnalytics()" title="Aggregated, read-only analytics across every branch" class="text-[10px] bg-[#1a1a1a] hover:bg-[#252525] gold-gradient-text border gold-border px-2 py-1 rounded fast-transition whitespace-nowrap w-full">📊 Centralised Analytics</button>
+                    <button onclick="openCentralAnalytics()" title="Aggregated, read-only analytics across every branch" class="branch-central-analytics-btn text-[10px] bg-[#1a1a1a] hover:bg-[#252525] gold-gradient-text border gold-border rounded fast-transition whitespace-nowrap">📊 Centralised Analytics</button>
                 </div>
 
                 <div class="user-info-box">
@@ -561,17 +581,16 @@
 
         // ============================================================
         // NAVIGATION TAXONOMY — 4 parent heads
+        // Journal + Audit History now live under Management (front_office).
         // ============================================================
         const ACCESS_HEADS = ['homepage', 'administrations', 'examination', 'front_office'];
         const HEAD_MODULES = {
             homepage: [
                 ['analytics', '◈', 'Analytics'],
                 ['assistant', '✦', 'Parallax'],
-                ['students', '🎓', 'Student Department'],
-                ['teachers', '👨‍🏫', 'Teacher Department'],
-                ['classrooms', '🏛️', 'Classroom Department'],
-                ['journal', '📓', 'Journal'],
-                ['audit_history', '📜', 'Audit History'],
+                ['students', '🎓', 'Student Database'],
+                ['teachers', '👨‍🏫', 'Teacher Database'],
+                ['classrooms', '🏛️', 'Classroom Database'],
             ],
             administrations: [
                 ['attendance', '📋', 'Attendance'],
@@ -589,10 +608,12 @@
                 ['inquiry', '📞', 'Inquiry & Lead Tracker'],
                 ['fees', '💳', 'Fees'],
                 ['users', '🔐', 'Manage Users'],
+                ['journal', '📓', 'Journal'],
+                ['audit_history', '📜', 'Audit History'],
             ],
         };
         const MODULE_HEAD = Object.fromEntries(Object.entries(HEAD_MODULES).flatMap(([h, ms]) => ms.map(([m]) => [m, h])));
-        const HEAD_LABELS = { homepage: 'Homepage', administrations: 'Administrations', examination: 'Examination', front_office: 'Front Office & Management' };
+        const HEAD_LABELS = { homepage: 'Homepage', administrations: 'Administrations', examination: 'Examination', front_office: 'Management' };
         const OWNER_ONLY_MODULES = new Set(['users', 'journal', 'audit_history']);
         const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination, ...HEAD_MODULES.front_office]
             .map(([m]) => m).filter(m => !OWNER_ONLY_MODULES.has(m));
@@ -1290,38 +1311,24 @@
         }
 
         // ----- PDF / Excel exports -----
-        // Shared helper: institute name from header (falls back gracefully)
         function getInstituteNameForExport() {
             const el = document.getElementById('headerInstituteName');
             const n = (el && el.textContent ? el.textContent : '').trim();
             return n && n !== '—' ? n : 'I.B.E.X.';
         }
 
-        /**
-         * Draws the standard I.B.E.X. PDF header.
-         * Layout:
-         *   - Institute name  (big, bold, centered)
-         *   - I.B.E.X. brand  (small) + "Powered by Metasys" (small, right)
-         *   - Document title  (bold)
-         *   - Subtitle        (optional)
-         *   - horizontal separator
-         * Returns the Y coordinate where content should begin.
-         */
         function ibexPdfHeader(doc, title, subtitle) {
             const pageWidth = doc.internal.pageSize.getWidth();
             const pageHeight = doc.internal.pageSize.getHeight();
-            // Beige paper background
             doc.setFillColor(250, 246, 233);
             doc.rect(0, 0, pageWidth, pageHeight, 'F');
 
-            // 1) Institute Name — large, bold, centered
             const instituteName = getInstituteNameForExport();
             doc.setFont('times', 'bold');
             doc.setTextColor(120, 92, 30);
             doc.setFontSize(24);
             doc.text(instituteName, pageWidth / 2, 20, { align: 'center' });
 
-            // 2) I.B.E.X. brand line
             doc.setFont('times', 'bold');
             doc.setFontSize(10);
             doc.setTextColor(150, 120, 60);
@@ -1330,7 +1337,6 @@
             doc.setFontSize(8);
             doc.text('Powered by Metasys', pageWidth - 14, 30, { align: 'right' });
 
-            // 3) Document title
             doc.setFont('times', 'bold');
             doc.setFontSize(15);
             doc.setTextColor(45, 35, 15);
@@ -1525,7 +1531,7 @@
                 <div class="space-y-6">
                     <div class="flex justify-between items-center flex-wrap gap-4">
                         <div>
-                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Student Department</h2>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Student Database</h2>
                             <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Segregated Batchwise • A-Z</p>
                         </div>
                         ${canWrite ? `
@@ -1911,7 +1917,7 @@
                     </label>
                 `).join('')}
             `;
-            grid.innerHTML = section('administrations', 'Administrations') + section('examination', 'Examination') + section('front_office', 'Front Office & Management');
+            grid.innerHTML = section('administrations', 'Administrations') + section('examination', 'Examination') + section('front_office', 'Management');
         }
 
         function openUserModal(userId) {
@@ -2013,7 +2019,6 @@
                 .replace(/\*/g, '')
                 .replace(/^\s{0,3}#{1,6}\s*/gm, '')
                 .replace(/#/g, '')
-                // Strip markdown italics/emphasis markers so the answer never renders italic
                 .replace(/_{1,2}(.+?)_{1,2}/g, '$1')
                 .trim();
         }
@@ -3014,7 +3019,7 @@
             }
         };
 
-        console.log('I.B.E.X. fully loaded – 4-head nav, journal, audit history, slump detector, batch-scoped seating.');
+        console.log('I.B.E.X. fully loaded – Journal + Audit History under Management.');
     </script>
 
     <!-- Embedded exam results/history scripts -->
@@ -3090,15 +3095,6 @@
           window.deleteExamResult=async(id)=>{if(!confirm('Delete this result record?'))return;try{await api(`/api/exam/results/${id}`,{method:'DELETE'});await renderResults();}catch(e){alert(e.message)}};
           window.editExamResult=async(id)=>{const r=(window.__examResultRows||[]).find(x=>x.id===id);if(!r)return;document.getElementById('erBatch').value=r.batch_name;document.getElementById('erSubjects').value=r.subjects;document.getElementById('erTopics').value=r.topics;document.getElementById('erDate').value=r.exam_date;document.getElementById('erOverall').value=r.overall_marks;await loadResultsStudents();const inp=document.querySelector(`[data-mark-for="${r.student_id}"]`);if(inp)inp.value=r.marks??'';window.__examEditingId=id;document.getElementById('erLoad').textContent='UPDATE STUDENT';document.getElementById('erLoad').onclick=async()=>{try{const s=(window.__examStudents||[]).find(x=>x.id===r.student_id),m=Number(document.querySelector(`[data-mark-for="${r.student_id}"]`).value),meta=window.__examResultMeta;await api(`/api/exam/results/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:Number(branchId()),batch_name:meta.batch,subjects:meta.subjects,topics:meta.topics,exam_date:meta.date,overall_marks:Number(meta.overall),student_id:r.student_id,student_name:s.name,roll_number:s.roll_number,marks:m})});await renderResults();}catch(e){alert(e.message)}}};
 
-          /**
-           * Examination Results PDF.
-           * Structure requested:
-           *   - Header (institute name at top, etc.)
-           *   - For each (batch + subject + topic + date + overall) group:
-           *       * Big heading above the grid:  "Batch · Subject"
-           *       * Subheading line:             "Topic: X | Date: Y | Overall: Z"
-           *       * Table with:                  Student Name | Roll Number | Marks / Z
-           */
           function pdfResults() {
             const rows = window.__examResultRows || [];
             if (!rows.length) { alert('No saved result records to download.'); return; }
@@ -3109,7 +3105,6 @@
             const pageHeight = doc.internal.pageSize.getHeight();
             let y = ibexPdfHeader(doc, 'Examination Results', 'Marks recorded for every examination paper');
 
-            // Group by batch + subjects + topics + exam_date + overall_marks
             const groups = new Map();
             rows.forEach(r => {
               const key = [r.batch_name || '', r.subjects || '', r.topics || '', r.exam_date || '', r.overall_marks ?? ''].join('||');
@@ -3120,13 +3115,11 @@
             groups.forEach((records, key) => {
               const [batch, subjects, topics, examDate, overall] = key.split('||');
 
-              // If we're running out of room, start a new page
               if (y > pageHeight - 60) {
                 doc.addPage();
                 y = ibexPdfHeader(doc, 'Examination Results (continued)', '');
               }
 
-              // Big heading above the grid — subject & batch only once per paper
               doc.setFont('times', 'bold');
               doc.setFontSize(16);
               doc.setTextColor(45, 35, 15);
