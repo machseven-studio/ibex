@@ -1128,25 +1128,18 @@ def mark_attendance(req: AttendanceMarkRequest, institute: CurrentInstitute = De
     return {"status": "success"}
 
 
-@app.get("/api/attendance/{branch_id}/{date}")
-def get_attendance_for_date(branch_id: int, date: str, institute: CurrentInstitute = Depends(get_current_institute)):
-    check_module_access(institute, "attendance")
-    verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
-    if branch_id == 0:
-        cursor.execute("SELECT student_name, status FROM attendance WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND date = %s", (institute.id, date))
-    else:
-        cursor.execute("SELECT student_name, status FROM attendance WHERE branch_id = %s AND date = %s", (branch_id, date))
-    marks = {row["student_name"]: row["status"] for row in cursor.fetchall()}
-    conn.close()
-    return marks
-
-
 @app.get("/api/attendance/history/{branch_id}")
 def get_attendance_history(branch_id: int, student_name: str, institute: CurrentInstitute = Depends(get_current_institute)):
     """Full past attendance record for one student, most recent date first -
-    the 'view attendance report for each student' feature."""
+    the 'view attendance report for each student' feature.
+
+    NOTE: this route must stay registered BEFORE
+    /api/attendance/{branch_id}/{date} below. Starlette matches routes in
+    registration order, and a request to /api/attendance/history/5 has the
+    same two-segment shape as /api/attendance/{branch_id}/{date} — if that
+    route came first, "history" would be captured as branch_id and fail
+    int validation ("Input should be a valid integer, unable to parse
+    string as an integer")."""
     check_module_access(institute, "attendance")
     verify_branch_read_access(branch_id, institute.id)
     conn = get_conn()
@@ -1171,6 +1164,21 @@ def get_attendance_history(branch_id: int, student_name: str, institute: Current
         "present_count": present,
         "absent_count": len(history) - present,
     }
+
+
+@app.get("/api/attendance/{branch_id}/{date}")
+def get_attendance_for_date(branch_id: int, date: str, institute: CurrentInstitute = Depends(get_current_institute)):
+    check_module_access(institute, "attendance")
+    verify_branch_read_access(branch_id, institute.id)
+    conn = get_conn()
+    cursor = conn.cursor()
+    if branch_id == 0:
+        cursor.execute("SELECT student_name, status FROM attendance WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND date = %s", (institute.id, date))
+    else:
+        cursor.execute("SELECT student_name, status FROM attendance WHERE branch_id = %s AND date = %s", (branch_id, date))
+    marks = {row["student_name"]: row["status"] for row in cursor.fetchall()}
+    conn.close()
+    return marks
 
 
 # ---------------------------------------------------------------------------
