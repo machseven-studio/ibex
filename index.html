@@ -757,6 +757,10 @@
             examination: [['seating', '', 'Seating'], ['invigilation', '', 'Invigilation'], ['results', '▣', 'Results'], ['history', '◷', 'History']]
         };
         const MODULE_HEAD = Object.fromEntries(Object.entries(HEAD_MODULES).flatMap(([h, ms]) => ms.map(([m]) => [m, h])));
+        // Homepage's children (Analytics, Parallax, the 3 departments, Manage
+        // Users) stay owner-only — only Administrations' and Examination's
+        // children can be individually granted to a staff login.
+        const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination].map(([m]) => m);
 
         // ----- Utility -----
         function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
@@ -861,7 +865,7 @@
             myPermission = data.permission || 'owner';
             myFullName = data.full_name || data.institute_name || '';
             myDesignation = data.designation || (isOwner ? 'Owner' : 'Staff');
-            myAllowedModules = isOwner ? ACCESS_HEADS.slice() : (Array.isArray(data.allowed_modules) ? data.allowed_modules.filter(x => ACCESS_HEADS.includes(x)) : []);
+            myAllowedModules = isOwner ? Object.keys(MODULE_HEAD) : (Array.isArray(data.allowed_modules) ? data.allowed_modules.filter(x => STAFF_GRANTABLE_MODULES.includes(x)) : []);
             document.getElementById('headerInstituteName').textContent = data.institute_name;
             document.getElementById('headerFullName').textContent = data.full_name || data.institute_name;
             renderModuleGroups();
@@ -989,9 +993,19 @@
         function renderModuleGroups() {
             const groups = document.getElementById('moduleGroups');
             if (!groups) return;
-            groups.innerHTML = ACCESS_HEADS.filter(h => isOwner || myAllowedModules.includes(h)).map(head => {
+            groups.innerHTML = ACCESS_HEADS.filter(head => {
+                if (isOwner) return true;
+                // Homepage is always boss-only; Administrations/Examination
+                // show up for staff only if they hold at least one of that
+                // head's individual modules.
+                if (head === 'homepage') return false;
+                return HEAD_MODULES[head].some(([m]) => myAllowedModules.includes(m));
+            }).map(head => {
                 const open = false;
-                const children = HEAD_MODULES[head].filter(([m]) => m !== 'users' || isOwner);
+                const children = HEAD_MODULES[head].filter(([m]) => {
+                    if (m === 'users') return isOwner;
+                    return isOwner || myAllowedModules.includes(m);
+                });
                 const title = head === 'homepage' ? 'Homepage' : head === 'administrations' ? 'Administrations' : 'Examination';
                 return `<div class="mb-1 module-head-group" data-head="${head}">
                     <div class="w-full flex items-center justify-between px-3 py-3 rounded-lg text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-yellow-500 hover:bg-[#111]">
@@ -1006,8 +1020,7 @@
         }
 
         async function switchModule(moduleName, clickedButton = null) {
-            const head = MODULE_HEAD[moduleName] || moduleName;
-            if (!isOwner && !myAllowedModules.includes(head)) {
+            if (!isOwner && !myAllowedModules.includes(moduleName)) {
                 alert('Your account does not have access to that module.');
                 return;
             }
@@ -1022,7 +1035,7 @@
         }
 
         function switchHead(head) {
-            if (!isOwner && !myAllowedModules.includes(head)) return;
+            if (!isOwner && !HEAD_MODULES[head].some(([m]) => myAllowedModules.includes(m))) return;
             if (head === 'homepage') {
                 currentModule = 'home';
                 document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
@@ -1886,7 +1899,8 @@
         // ----- Users -----
         const MODULE_LABELS = {
             students: 'Students', teachers: 'Teachers', classrooms: 'Classrooms', syllabus: 'Syllabus',
-            attendance: 'Attendance', analytics: 'Analytics', timetables: 'Timetable', seating: 'Seating', invigilation: 'Invigilation', fees: 'Fees', assistant: 'Parallax', whatsapp: 'WhatsApp Messaging'
+            attendance: 'Attendance', analytics: 'Analytics', timetables: 'Timetable', seating: 'Seating', invigilation: 'Invigilation', fees: 'Fees', assistant: 'Parallax', whatsapp: 'WhatsApp Messaging',
+            results: 'Results', history: 'History'
         };
 
         let usersCache = [];
@@ -1955,12 +1969,16 @@
         function renderModuleCheckboxGrid(checkedModules) {
             const grid = document.getElementById('newUserModuleGrid');
             const checked = new Set(Array.isArray(checkedModules) ? checkedModules : []);
-            grid.innerHTML = ACCESS_HEADS.map(m => `
-                <label class="flex items-center space-x-2 text-xs text-gray-300 bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 ${m === 'homepage' ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}">
-                    <input type="checkbox" class="module-check newUserModuleCheckbox" value="${m}" ${m === 'homepage' ? 'disabled' : ''} ${checked.has(m) ? 'checked' : ''}>
-                    <span>${m === 'homepage' ? 'Homepage (Boss Only)' : m === 'administrations' ? 'Administrations' : 'Examination'}</span>
-                </label>
-            `).join('');
+            const section = (headKey, label) => `
+                <div class="col-span-2 text-[10px] font-black uppercase tracking-widest text-gray-500 mt-2 first:mt-0">${label}</div>
+                ${HEAD_MODULES[headKey].map(([m, , childLabel]) => `
+                    <label class="flex items-center space-x-2 text-xs text-gray-300 bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 cursor-pointer">
+                        <input type="checkbox" class="module-check newUserModuleCheckbox" value="${m}" ${checked.has(m) ? 'checked' : ''}>
+                        <span>${childLabel}</span>
+                    </label>
+                `).join('')}
+            `;
+            grid.innerHTML = section('administrations', 'Administrations') + section('examination', 'Examination');
         }
 
         function openUserModal(userId) {
