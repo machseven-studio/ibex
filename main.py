@@ -10,6 +10,7 @@ import secrets
 import shutil
 import psycopg2
 import bcrypt
+import razorpay
 from psycopg2.extras import DictCursor
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -91,10 +92,6 @@ def clear_session_cookie(response: "Response"):
 VALID_MODULES = ['students', 'teachers', 'classrooms', 'syllabus', 'attendance', 'invigilation', 'fees']
 SEATING_MODULE = 'seating'
 
-# Every individually-grantable leaf module, keyed to the parent it lives
-# under in the sidebar. Manage Users grants/checks access at this leaf
-# level (not the old head level) so a staff member can be given, say,
-# just "Attendance" without also getting "Fees" or "WhatsApp Messaging".
 ACCESS_HEADS = ['homepage', 'administrations', 'examination']
 MODULE_HEAD = {
     'analytics': 'homepage', 'assistant': 'homepage', 'students': 'homepage',
@@ -103,9 +100,6 @@ MODULE_HEAD = {
     'timetables': 'administrations', 'fees': 'administrations', 'whatsapp': 'administrations',
     'seating': 'examination', 'invigilation': 'examination', 'results': 'examination', 'history': 'examination',
 }
-# Homepage's children (analytics, Parallax, the three departments, Manage
-# Users) stay owner-only, same as before — only Administrations' and
-# Examination's children can be handed out to staff.
 STAFF_GRANTABLE_MODULES = [m for m, h in MODULE_HEAD.items() if h in ('administrations', 'examination')]
 ALL_ACCESS_MODULES = list(MODULE_HEAD.keys())
 
@@ -118,6 +112,13 @@ DESIGNATION_PRESETS = ['Admin', 'Accountant', 'Teacher', 'Head', 'Clerk', 'Custo
 WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+
+# Razorpay online payments configuration. Both keys are required for the
+# /api/payments/* endpoints to work; if either is missing the endpoints
+# return 503 and the frontend falls back to the manual "Mark Paid" flow.
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_CURRENCY = os.getenv("RAZORPAY_CURRENCY", "INR")
 
 
 # ---------------------------------------------------------------------------
@@ -150,12 +151,11 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS timetable_configs (id SERIAL PRIMARY KEY, branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE, batch_name TEXT NOT NULL, timings_json TEXT NOT NULL, teachers_config_json TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL, UNIQUE(branch_id, batch_name))""",
         """CREATE TABLE IF NOT EXISTS exam_seatings (id SERIAL PRIMARY KEY, branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE, exam_date TEXT NOT NULL, room_number TEXT NOT NULL, rows INTEGER NOT NULL, columns INTEGER NOT NULL, assignments_json TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL)""",
         """CREATE TABLE IF NOT EXISTS invigilation (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, teacher_name TEXT, exam_date TEXT, room TEXT, document TEXT)""",
-        """CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, student_name TEXT, amount_inr NUMERIC(12,2), status TEXT, due_date TEXT, document TEXT, utr_reference TEXT, paid_at TIMESTAMPTZ, paid_by INTEGER)""",
+        """CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, student_name TEXT, amount_inr NUMERIC(12,2), status TEXT, due_date TEXT, document TEXT, utr_reference TEXT, paid_at TIMESTAMPTZ, paid_by INTEGER, razorpay_order_id TEXT, razorpay_payment_id TEXT)""",
         """CREATE TABLE IF NOT EXISTS audit_log (id BIGSERIAL PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(), user_id INTEGER, branch_id INTEGER, action_type TEXT NOT NULL, before_after_payload JSONB NOT NULL DEFAULT '{}'::jsonb)""",
     ]
     for stmt in statements:
         cur.execute(stmt)
-    # Safe additive migrations for databases created by earlier builds.
     for stmt in [
         "ALTER TABLE branches ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
         "UPDATE branches SET tenant_id = institute_id WHERE tenant_id IS NULL",
@@ -238,6 +238,8 @@ def init_db():
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS utr_reference TEXT",
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ",
         "ALTER TABLE fees ADD COLUMN IF NOT EXISTS paid_by INTEGER",
+        "ALTER TABLE fees ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT",
+        "ALTER TABLE fees ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT",
     ]:
         cur.execute(stmt)
     for stmt in [
@@ -269,21 +271,15 @@ def _legacy_pbkdf2_hash(password: str, salt: str) -> str:
 
 
 def hash_password(password: str) -> str:
-    """Bcrypt with a per-password random salt baked into the hash string
-    itself - no separate salt column needed for new accounts."""
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str, legacy_salt: str | None) -> tuple[bool, str | None]:
-    """Returns (is_valid, upgraded_hash). upgraded_hash is non-None when a
-    legacy PBKDF2 hash just verified successfully and should be rewritten to
-    bcrypt by the caller (transparent password-hash migration on login)."""
     if password_hash.startswith("$2"):
         try:
             return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8")), None
         except ValueError:
             return False, None
-    # Legacy PBKDF2 record - verify against it, then flag for upgrade.
     if not legacy_salt:
         return False, None
     computed = _legacy_pbkdf2_hash(password, legacy_salt)
@@ -308,19 +304,17 @@ def create_session(institute_id: int, staff_user_id: int = None) -> str:
 
 class CurrentInstitute(BaseModel):
     user_id: int | None = None
-    id: int  # institute_id - used for all data scoping, whether owner or staff
+    id: int
     institute_name: str
     full_name: str
     email: str
     is_owner: bool
-    permission: str  # 'owner' | 'edit' | 'read_only'
+    permission: str
     designation: str = "Owner"
-    allowed_modules: list = ALL_ACCESS_MODULES  # modules this login may open in the sidebar
+    allowed_modules: list = ALL_ACCESS_MODULES
 
 
 def check_module_access(institute: "CurrentInstitute", module: str):
-    # Owners can use everything. Staff are granted individual leaf modules
-    # now (e.g. "attendance", "results") rather than whole parent heads.
     if institute.is_owner:
         return
     if module not in institute.allowed_modules:
@@ -328,9 +322,6 @@ def check_module_access(institute: "CurrentInstitute", module: str):
 
 
 def get_current_institute(alg_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> CurrentInstitute:
-    """Session token now travels exclusively as an HttpOnly, Secure,
-    SameSite=Strict cookie - never in JS-readable storage or a header the
-    frontend has to manage, so it can't be exfiltrated via XSS."""
     if not alg_session:
         raise HTTPException(status_code=401, detail="Not authenticated")
     token = alg_session
@@ -396,14 +387,12 @@ def get_current_institute(alg_session: str | None = Cookie(default=None, alias=S
 
 
 def require_write_access(institute: CurrentInstitute = Depends(get_current_institute)) -> CurrentInstitute:
-    """Blocks any mutating request from a staff login flagged read-only."""
     if institute.permission == "read_only":
         raise HTTPException(status_code=403, detail="Your account has read-only access")
     return institute
 
 
 def require_owner(institute: CurrentInstitute = Depends(get_current_institute)) -> CurrentInstitute:
-    """Manage Users, and other owner-exclusive actions, check this."""
     if not institute.is_owner:
         raise HTTPException(status_code=403, detail="Only the institute owner can do this")
     return institute
@@ -420,14 +409,12 @@ def verify_branch_ownership(branch_id: int, institute_id: int):
 
 
 def verify_branch_read_access(branch_id: int, institute_id: int):
-    """Branch 0 is the synthetic Centralized HQ read-only view."""
     if branch_id == 0:
         return
     verify_branch_ownership(branch_id, institute_id)
 
 
 def audit_write(institute: CurrentInstitute, branch_id: int | None, action_type: str, before=None, after=None):
-    """Durable audit event for every application-level DB mutation."""
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -485,7 +472,6 @@ def signup(req: SignupRequest, response: Response):
             (req.institute_name, req.full_name, req.email.lower(), password_hash, "", datetime.utcnow().isoformat()),
         )
         institute_id = cursor.fetchone()[0]
-        # every new institute gets one starter branch
         cursor.execute(
             "INSERT INTO branches (institute_id, tenant_id, name) VALUES (%s, %s, %s)",
             (institute_id, institute_id, "Main Campus"),
@@ -517,8 +503,6 @@ def login(req: LoginRequest, request: Request, response: Response):
     cursor.execute("SELECT * FROM institutes WHERE email = %s", (req.email.lower(),))
     institute = cursor.fetchone()
 
-    # Deliberately same error for "no such email" and "wrong password" so
-    # attackers can't use this endpoint to find out which emails are registered.
     invalid = HTTPException(status_code=401, detail="Invalid email or password")
 
     if institute:
@@ -540,7 +524,6 @@ def login(req: LoginRequest, request: Request, response: Response):
                 "allowed_modules": ALL_ACCESS_MODULES,
             }
 
-    # Not an owner account (or wrong password) - check staff logins.
     cursor.execute("SELECT * FROM staff_users WHERE email = %s", (req.email.lower(),))
     staff = cursor.fetchone()
     if staff:
@@ -628,9 +611,9 @@ class StaffUserCreate(BaseModel):
     full_name: str
     email: EmailStr
     password: str
-    permission: str  # 'edit' | 'read_only'
-    designation: str  # e.g. 'Admin', 'Accountant', 'Teacher', 'Head', 'Clerk', 'Custom'
-    modules: list = []  # which sidebar modules this designation may open
+    permission: str
+    designation: str
+    modules: list = []
 
 
 class StaffPermissionUpdate(BaseModel):
@@ -652,8 +635,10 @@ def list_staff_users(institute: CurrentInstitute = Depends(require_owner)):
     try:
         conn = get_conn()
         cursor = conn.cursor()
+        # FIX: was selecting "permissions" (plural) which does not exist.
+        # The canonical column is "permission" (singular).
         cursor.execute(
-            "SELECT id, full_name, email, permissions, designation, module_access, created_at FROM staff_users WHERE institute_id = %s",
+            "SELECT id, full_name, email, permission, designation, module_access, created_at FROM staff_users WHERE institute_id = %s",
             (institute.id,),
         )
         users = []
@@ -716,8 +701,6 @@ def verify_staff_ownership(user_id: int, institute_id: int):
 
 @app.patch("/api/users/{user_id}")
 def update_staff_permission(user_id: int, req: StaffPermissionUpdate, institute: CurrentInstitute = Depends(require_owner)):
-    """Partial update - the boss can change permission, designation, and/or
-    module access (grant/revoke) independently or all at once."""
     verify_staff_ownership(user_id, institute.id)
     pre_conn = get_conn(); pre_cur = pre_conn.cursor(); pre_cur.execute("SELECT permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,)); before_user = pre_cur.fetchone(); pre_conn.close()
 
@@ -753,7 +736,8 @@ def remove_staff_user(user_id: int, institute: CurrentInstitute = Depends(requir
     verify_staff_ownership(user_id, institute.id)
     conn = get_conn()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, full_name, email, permissions, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
+    # FIX: same plural/singular mismatch as list_staff_users.
+    cursor.execute("SELECT id, full_name, email, permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
     before_user = cursor.fetchone()
     cursor.execute("DELETE FROM staff_users WHERE id = %s", (user_id,))
     cursor.execute("DELETE FROM sessions WHERE staff_user_id = %s", (user_id,))
@@ -858,27 +842,20 @@ def get_records(module: str, branch_id: int, search: str = "", sort: str = "id",
 
 
 def _sniff_mime(contents: bytes, ext: str) -> str:
-    """Cheap magic-byte sniff so a renamed .exe with a .pdf extension is
-    caught server-side, not trusted off the client-supplied extension alone."""
     if contents[:4] == b"%PDF":
         return "application/pdf"
     if contents[:3] == b"\xff\xd8\xff":
         return "image/jpeg"
     if contents[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
-    if contents[:4] == b"PK\x03\x04":  # .docx is a zip container
+    if contents[:4] == b"PK\x03\x04":
         return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if contents[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":  # legacy .doc (OLE)
+    if contents[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
         return "application/msword"
     return "application/octet-stream"
 
 
 def save_upload(file: UploadFile) -> str:
-    """Validates extension, size, and actual file content (not just the
-    client-declared extension/content-type), then stores the file under a
-    random UUID name - never the original filename - inside UPLOAD_DIR, which
-    sits outside any publicly served static root. Files are only ever handed
-    back out through the authenticated /api/uploads/{filename} endpoint."""
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
         raise HTTPException(
@@ -897,8 +874,6 @@ def save_upload(file: UploadFile) -> str:
 
     filename = f"{secrets.token_hex(16)}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
-    # Defense in depth: refuse to write anywhere outside UPLOAD_DIR even if
-    # filename generation above were ever changed to something less strict.
     if os.path.commonpath([UPLOAD_DIR, os.path.abspath(dest)]) != UPLOAD_DIR:
         raise HTTPException(status_code=400, detail="Invalid upload path")
     with open(dest, "wb") as buffer:
@@ -906,18 +881,11 @@ def save_upload(file: UploadFile) -> str:
     return filename
 
 
-# Every table that can carry an uploaded document, used to confirm a
-# requested file actually belongs to the requesting institute's tenant
-# before it's served back out.
 DOCUMENT_TABLES = ["classrooms", "attendance", "invigilation", "fees", "students", "teachers", "syllabus"]
 
 
 @app.get("/api/uploads/{filename}")
 def get_uploaded_file(filename: str, institute: CurrentInstitute = Depends(get_current_institute)):
-    """Uploads are no longer served by a public static mount. Any logged-in
-    member of the tenant that owns the record the file is attached to can
-    fetch it; everyone else gets a 404 (not a 403, so we don't confirm the
-    file even exists to an unauthorized caller)."""
     safe_name = os.path.basename(filename)
     if safe_name != filename or not safe_name:
         raise HTTPException(status_code=404, detail="File not found")
@@ -945,9 +913,6 @@ def get_uploaded_file(filename: str, institute: CurrentInstitute = Depends(get_c
     return FileResponse(path)
 
 
-# Non-document columns each module accepts from the client, in the order
-# they're bound into INSERT/UPDATE statements. Shared by add_record and
-# edit_record so the two can never drift out of sync with each other.
 RECORD_FIELDS = {
     "students": ["name", "batch", "roll_number", "parent_contact"],
     "teachers": ["name", "subject", "contact_number"],
@@ -957,12 +922,11 @@ RECORD_FIELDS = {
     "invigilation": ["teacher_name", "exam_date", "room"],
     "fees": ["student_name", "amount_inr", "status", "due_date", "utr_reference"],
 }
-# Modules whose table has a 'document' column that a file upload fills in.
 RECORD_HAS_DOCUMENT = {"classrooms", "attendance", "invigilation", "fees"}
 
 
 # ================================
-# INSTITUTE-WIDE SEARCH ENDPOINT (used by Parallax on homepage)
+# INSTITUTE-WIDE SEARCH ENDPOINT
 # ================================
 @app.get("/api/search/{branch_id}")
 def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = Depends(get_current_institute)):
@@ -1018,7 +982,6 @@ def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = 
 # ================================
 
 def send_whatsapp(to_number: str, message: str) -> bool:
-    """Send a WhatsApp message via the Meta Cloud API."""
     if not all([WHATSAPP_API_URL, WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
         return False
     import requests
@@ -1039,7 +1002,6 @@ def send_whatsapp(to_number: str, message: str) -> bool:
 
 @app.post("/api/whatsapp/send-absence")
 def send_absence_notification(req: dict, institute: CurrentInstitute = Depends(require_write_access)):
-    """Send a WhatsApp alert when a student is marked absent."""
     branch_id = req.get("branch_id")
     student_name = req.get("student_name")
     date = req.get("date")
@@ -1053,9 +1015,8 @@ def send_absence_notification(req: dict, institute: CurrentInstitute = Depends(r
         if not row or not row[0]:
             return {"status": "skipped", "reason": "No parent contact found."}
         parent_contact = row[0]
-        # Ensure phone number is in international format (e.g., +91...)
         if not parent_contact.startswith('+'):
-            parent_contact = '+91' + parent_contact  # Assume India if no country code
+            parent_contact = '+91' + parent_contact
         msg = f"Attendance Alert: Your ward {student_name} was marked ABSENT on {date}. Please contact the institute for further details."
         sent = send_whatsapp(parent_contact, msg)
         audit_write(institute, branch_id, "WHATSAPP_ABSENCE", None, {"student": student_name, "date": date, "sent": sent})
@@ -1066,23 +1027,39 @@ def send_absence_notification(req: dict, institute: CurrentInstitute = Depends(r
 
 @app.post("/api/whatsapp/send-fee-reminders")
 def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_access)):
-    """Send WhatsApp reminders to parents whose fee due date is within 7 days."""
+    """Send WhatsApp reminders to parents whose fee due date is within 7 days.
+
+    FIX: the fees table does not have a student_id column - it stores the
+    student_name as free text. Join back to students on (name, branch_id)
+    instead. Also made the status check case-insensitive and constrained
+    due_date to a strict ISO shape before casting, so a stray non-date
+    string can never blow up the query.
+    """
     conn = get_conn()
     try:
         cur = conn.cursor()
-        # Get students with fees due within 7 days (and not yet paid)
         cur.execute("""
-            SELECT s.name, s.parent_contact, f.due_date, f.amount_inr
+            SELECT f.student_name,
+                   s.parent_contact,
+                   f.due_date,
+                   f.amount_inr
             FROM fees f
-            JOIN students s ON s.id = f.student_id
+            LEFT JOIN students s
+              ON s.name = f.student_name
+             AND s.branch_id = f.branch_id
             WHERE f.branch_id IN (SELECT id FROM branches WHERE tenant_id=%s)
-              AND f.status != 'Paid'
+              AND LOWER(COALESCE(f.status,'')) != 'paid'
+              AND f.due_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
               AND f.due_date::date - CURRENT_DATE <= 7
               AND f.due_date::date >= CURRENT_DATE
         """, (institute.id,))
         rows = cur.fetchall()
         sent_count = 0
-        for name, contact, due, amount in rows:
+        for row in rows:
+            name = row["student_name"]
+            contact = row["parent_contact"]
+            due = row["due_date"]
+            amount = row["amount_inr"]
             if not contact:
                 continue
             if not contact.startswith('+'):
@@ -1096,6 +1073,156 @@ def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_acces
         conn.close()
 
 
+# ================================
+# RAZORPAY ONLINE PAYMENTS
+# ================================
+# Flow:
+#   1. Client POSTs /api/payments/create-order { fee_id }
+#   2. Server creates a Razorpay order for the fee amount, stores order_id on
+#      the fee row, and returns { order_id, amount, currency, key_id, ... }.
+#   3. Client opens Razorpay Checkout with those values.
+#   4. On success Razorpay calls back with (order_id, payment_id, signature).
+#   5. Client POSTs /api/payments/verify with those three values.
+#   6. Server verifies the HMAC signature server-side using the secret, then
+#      marks the fee paid and stores the payment id as the UTR reference.
+# If the keys are not configured on the server, create-order returns 503 and
+# the frontend falls back to the manual "Mark Paid" flow.
+
+def _razorpay_client():
+    if not (RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET):
+        raise HTTPException(status_code=503, detail="Online payments are not configured on this server.")
+    return razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+
+
+@app.get("/api/payments/config")
+def payments_config(institute: CurrentInstitute = Depends(get_current_institute)):
+    """Lets the frontend know whether to show the Pay Now button at all.
+    Never returns the secret - only the public key id."""
+    return {
+        "enabled": bool(RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET),
+        "key_id": RAZORPAY_KEY_ID or "",
+        "currency": RAZORPAY_CURRENCY,
+    }
+
+
+class PaymentCreateOrderRequest(BaseModel):
+    fee_id: int
+
+
+@app.post("/api/payments/create-order")
+def create_payment_order(req: PaymentCreateOrderRequest, institute: CurrentInstitute = Depends(require_write_access)):
+    check_module_access(institute, "fees")
+    client = _razorpay_client()
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT f.* FROM fees f
+               JOIN branches b ON b.id = f.branch_id
+               WHERE f.id = %s AND b.tenant_id = %s""",
+            (req.fee_id, institute.id),
+        )
+        fee = cur.fetchone()
+        if not fee:
+            raise HTTPException(status_code=404, detail="Fee record not found")
+        if str(fee["status"] or "").lower() == "paid":
+            raise HTTPException(status_code=400, detail="This fee is already marked as paid.")
+        amount = float(fee["amount_inr"] or 0)
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Fee amount must be greater than zero.")
+
+        amount_paise = int(round(amount * 100))
+        try:
+            order = client.order.create({
+                "amount": amount_paise,
+                "currency": RAZORPAY_CURRENCY,
+                "receipt": f"fee_{req.fee_id}",
+                "notes": {
+                    "fee_id": str(req.fee_id),
+                    "student": (fee["student_name"] or "")[:120],
+                    "institute_id": str(institute.id),
+                },
+            })
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Razorpay order creation failed: {e}")
+
+        cur.execute("UPDATE fees SET razorpay_order_id = %s WHERE id = %s", (order["id"], req.fee_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    audit_write(institute, fee["branch_id"], "CREATE_PAYMENT_ORDER", None,
+                {"fee_id": req.fee_id, "order_id": order["id"], "amount": amount})
+    return {
+        "order_id": order["id"],
+        "amount": amount_paise,
+        "currency": RAZORPAY_CURRENCY,
+        "key_id": RAZORPAY_KEY_ID,
+        "fee_id": req.fee_id,
+        "student_name": fee["student_name"] or "",
+    }
+
+
+class PaymentVerifyRequest(BaseModel):
+    fee_id: int
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+
+
+@app.post("/api/payments/verify")
+def verify_payment(req: PaymentVerifyRequest, institute: CurrentInstitute = Depends(require_write_access)):
+    check_module_access(institute, "fees")
+    client = _razorpay_client()
+
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT f.* FROM fees f
+               JOIN branches b ON b.id = f.branch_id
+               WHERE f.id = %s AND b.tenant_id = %s""",
+            (req.fee_id, institute.id),
+        )
+        fee = cur.fetchone()
+        if not fee:
+            raise HTTPException(status_code=404, detail="Fee record not found")
+
+        # Server-side signature verification. This is the only trustworthy
+        # check - the browser is never trusted to say "the payment succeeded".
+        try:
+            client.utility.verify_payment_signature({
+                "razorpay_order_id": req.razorpay_order_id,
+                "razorpay_payment_id": req.razorpay_payment_id,
+                "razorpay_signature": req.razorpay_signature,
+            })
+        except Exception:
+            audit_write(institute, fee["branch_id"], "PAYMENT_VERIFY_FAILED", dict(fee),
+                        {"order_id": req.razorpay_order_id, "payment_id": req.razorpay_payment_id})
+            raise HTTPException(status_code=400, detail="Payment signature verification failed.")
+
+        cur.execute(
+            """UPDATE fees
+               SET status = 'Paid',
+                   utr_reference = %s,
+                   razorpay_order_id = %s,
+                   razorpay_payment_id = %s,
+                   paid_at = NOW(),
+                   paid_by = %s
+               WHERE id = %s""",
+            (req.razorpay_payment_id, req.razorpay_order_id, req.razorpay_payment_id,
+             institute.user_id, req.fee_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    audit_write(institute, fee["branch_id"], "PAYMENT_VERIFIED", dict(fee),
+                {"order_id": req.razorpay_order_id, "payment_id": req.razorpay_payment_id})
+    return {"status": "paid", "fee_id": req.fee_id, "payment_id": req.razorpay_payment_id}
+
+
 # ---------------------------------------------------------------------------
 # Attendance (batchwise present/absent marking, sourced from Student Department)
 # ---------------------------------------------------------------------------
@@ -1104,7 +1231,7 @@ class AttendanceMarkRequest(BaseModel):
     branch_id: int
     student_name: str
     date: str
-    status: str  # 'Present' or 'Absent'
+    status: str
 
 
 @app.post("/api/attendance/mark")
@@ -1116,8 +1243,6 @@ def mark_attendance(req: AttendanceMarkRequest, institute: CurrentInstitute = De
 
     conn = get_conn()
     cursor = conn.cursor()
-    # Re-marking the same student on the same day replaces the old mark
-    # instead of piling up duplicate attendance rows.
     cursor.execute(
         "DELETE FROM attendance WHERE branch_id = %s AND student_name = %s AND date = %s",
         (req.branch_id, req.student_name, req.date),
@@ -1134,16 +1259,6 @@ def mark_attendance(req: AttendanceMarkRequest, institute: CurrentInstitute = De
 
 @app.get("/api/attendance/history/{branch_id}")
 def get_attendance_history(branch_id: int, student_name: str, institute: CurrentInstitute = Depends(get_current_institute)):
-    """Full past attendance record for one student, most recent date first -
-    the 'view attendance report for each student' feature.
-
-    NOTE: this route must stay registered BEFORE
-    /api/attendance/{branch_id}/{date} below. Starlette matches routes in
-    registration order, and a request to /api/attendance/history/5 has the
-    same two-segment shape as /api/attendance/{branch_id}/{date} — if that
-    route came first, "history" would be captured as branch_id and fail
-    int validation ("Input should be a valid integer, unable to parse
-    string as an integer")."""
     check_module_access(institute, "attendance")
     verify_branch_read_access(branch_id, institute.id)
     conn = get_conn()
@@ -1206,10 +1321,6 @@ def get_timetable_slots(branch_id: int, institute: CurrentInstitute = Depends(ge
 
 @app.get("/api/timetable/configs/{branch_id}")
 def list_timetable_configs(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
-    """The saved prerequisites (timings + per-teacher lectures/unavailable
-    days) for every batch that's had a timetable generated, so the frontend
-    can offer 'load this batch to edit & regenerate' without the user
-    retyping anything."""
     check_module_access(institute, "timetables")
     verify_branch_read_access(branch_id, institute.id)
     conn = get_conn()
@@ -1239,24 +1350,18 @@ def list_timetable_configs(branch_id: int, institute: CurrentInstitute = Depends
 
 class TimingSlot(BaseModel):
     lecture_number: int
-    time_slot: str  # e.g. "09:00 AM - 10:00 AM"
+    time_slot: str
 
 
 class TimetableGenerateRequest(BaseModel):
     branch_id: int
     batch_name: str
-    teachers_config: list  # [{name, subject, lectures_per_week, unavailable_days: []}]
+    teachers_config: list
     timings: list[TimingSlot]
 
 
 @app.post("/api/timetable/generate")
 def generate_timetable(req: TimetableGenerateRequest, institute: CurrentInstitute = Depends(require_write_access)):
-    """Generate one batch timetable while deliberately spreading each teacher's
-    weekly lectures across the week whenever the constraints allow it.
-
-    Preferred weekdays are evenly spaced (for example Mon/Wed/Fri for three
-    lectures), then batch, teacher and room conflicts are checked.
-    """
     try:
         return _generate_timetable_impl(req, institute)
     except HTTPException:
@@ -1274,8 +1379,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
     conn = get_conn()
     cursor = conn.cursor()
 
-    # Regenerate exactly this batch; other batches remain available for teacher
-    # and room conflict checks.
     cursor.execute(
         "DELETE FROM timetables_slots WHERE branch_id = %s AND batch_name = %s",
         (req.branch_id, req.batch_name),
@@ -1295,7 +1398,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
     generated_slots = []
     warnings = []
 
-    # Current batch load is kept in memory so scoring is cheap.
     batch_load = {day: 0 for day in days}
 
     def slot_is_free(day, timing, teacher_name):
@@ -1331,8 +1433,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         used_days = []
         eligible_days = [d for d in days if d not in unavailable]
 
-        # Evenly distribute the requested weekly lectures: 2 -> Mon/Fri,
-        # 3 -> Mon/Wed/Fri, 4 -> Mon/Tue/Thu/Fri, 5 -> every weekday.
         if target_lectures <= 1:
             preferred_day_indices = [0] if eligible_days else []
         elif target_lectures <= len(eligible_days):
@@ -1343,9 +1443,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         else:
             preferred_day_indices = [i % len(eligible_days) for i in range(target_lectures)] if eligible_days else []
 
-        # Each lecture is chosen from ALL free day/time candidates. The scoring
-        # strongly prefers the next evenly-spaced weekday, then an unused day,
-        # then a lightly loaded day/time. Conflicts can still force a fallback.
         for lecture_index in range(target_lectures):
             candidates = []
             desired_idx = preferred_day_indices[lecture_index] if preferred_day_indices else 0
@@ -1361,8 +1458,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
                     min_distance = min((abs(idx - used) for used in used_days), default=5)
                     same_day_penalty = 1000 if idx in used_days and len(set(used_days)) < len(eligible_days) else 0
                     preferred_distance = abs(idx - day_index[desired_day]) if desired_day else 0
-                    # Lower score wins. Preferred weekdays dominate, while
-                    # day load and distance provide sensible tie-breaking.
                     score = (
                         preferred_distance * 100
                         + same_day_penalty
@@ -1427,7 +1522,6 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
 
 @app.delete("/api/timetable/all/{branch_id}")
 def delete_all_timetables(branch_id: int, institute: CurrentInstitute = Depends(require_write_access)):
-    """Completely reset the timetable workspace for the selected branch."""
     check_module_access(institute, "timetables")
     verify_branch_ownership(branch_id, institute.id)
     conn = get_conn()
@@ -1452,7 +1546,6 @@ class TimetableSlotEdit(BaseModel):
 
 @app.patch("/api/timetable/slots/{slot_id}")
 def edit_timetable_slot(slot_id: int, req: TimetableSlotEdit, institute: CurrentInstitute = Depends(require_write_access)):
-    """Manual override with the same teacher/room overlap guarantees as auto-generation."""
     check_module_access(institute, "timetables")
     conn = get_conn()
     cursor = conn.cursor()
@@ -1574,8 +1667,6 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
 
     conn = get_conn()
 
-    # Any registered classroom in this institute may host an exam. Classroom
-    # department/branch ownership is intentionally not a seating restriction.
     room_cur = conn.cursor()
     room_cur.execute(
         """SELECT c.room_no, c.capacity
@@ -1599,7 +1690,6 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
         conn.close()
         raise HTTPException(status_code=400, detail=f"Grid capacity ({requested_capacity}) exceeds room capacity ({room_capacity}).")
 
-    # Re-generating one room replaces only that room's previous allocation.
     cursor = conn.cursor()
     cursor.execute(
         "SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s",
@@ -1621,8 +1711,6 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
         (req.branch_id, req.exam_date, room_number),
     )
 
-    # Fetch the selected branch's complete student pool, remove students already
-    # consumed by other rooms for this exam, then randomize the remaining pool.
     cursor.execute(
         """SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number
            FROM students WHERE branch_id = %s""",
@@ -1716,10 +1804,11 @@ def mark_fee_paid(fee_id: int, req: FeeMarkPaidRequest, institute: CurrentInstit
 # Branch analytics
 # ---------------------------------------------------------------------------
 
+IST_OFFSET = timedelta(hours=5, minutes=30)
+
+
 @app.get("/api/analytics/{branch_id}")
 def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
-    """Return analytics without allowing one malformed/legacy record to take
-    down the entire dashboard. Every query remains server-side and tenant-scoped."""
     verify_branch_read_access(branch_id, institute.id)
     conn = get_conn()
     cur = conn.cursor()
@@ -1794,8 +1883,6 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
     scheduled = int(one(f"SELECT COUNT(*) FROM timetables_slots WHERE {scope}", (scope_param,)))
     logged = int(one(f"SELECT COUNT(*) FROM syllabus WHERE {scope} AND lecture_date >= %s", (scope_param, week_start.isoformat())))
 
-    # Payment date is intentionally derived from paid_at first, then a strictly
-    # validated ISO due_date fallback. No arbitrary text is cast to a date.
     revenue_rows = all_rows(f"""
         SELECT COALESCE(TO_CHAR(paid_at, 'YYYY-MM-DD'),
                         CASE WHEN due_date ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$' THEN due_date END) AS day,
@@ -1823,13 +1910,7 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
 # Dashboard analytics
 # ---------------------------------------------------------------------------
 
-IST_OFFSET = timedelta(hours=5, minutes=30)
-
-
 def _parse_time_range(time_slot: str):
-    """Best-effort parse of a free-text '09:00 AM - 10:00 AM' timing string
-    into two time objects. Returns (None, None) if it doesn't match - a
-    malformed timing just never counts as 'ongoing', it doesn't crash."""
     import re
     m = re.match(r"\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*-\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*", time_slot or "")
     if not m:
@@ -1856,9 +1937,8 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
 
     now_ist = datetime.utcnow() + IST_OFFSET
     today = now_ist.date()
-    week_start = today - timedelta(days=6)  # last 7 days including today
+    week_start = today - timedelta(days=6)
 
-    # --- Attendance this week, per batch ---
     attendance_week = []
     if institute.is_owner or "attendance" in institute.allowed_modules:
         cursor.execute("SELECT id, name, batch FROM students WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)" if branch_id == 0 else "SELECT id, name, batch FROM students WHERE branch_id = %s", (institute.id if branch_id == 0 else branch_id,))
@@ -1878,7 +1958,6 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
             pct = round(100 * stats["present"] / stats["total"]) if stats["total"] else 0
             attendance_week.append({"batch": batch, "present": stats["present"], "total": stats["total"], "pct": pct})
 
-    # --- Fees pending ---
     fees_pending_total, fees_pending_count = 0, 0
     if institute.is_owner or "fees" in institute.allowed_modules:
         cursor.execute(
@@ -1887,7 +1966,6 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
         )
         fees_pending_count, fees_pending_total = cursor.fetchone()
 
-    # --- Lectures ongoing right now, per batch ---
     ongoing_lectures = []
     if institute.is_owner or "timetables" in institute.allowed_modules:
         today_name = now_ist.strftime("%A")
@@ -1937,9 +2015,6 @@ class AssistantQuery(BaseModel):
 
 
 def _parallax_gather_context(branch_id: int, institute: "CurrentInstitute") -> str:
-    """Pulls a compact, branch-scoped snapshot of every module's data so
-    Parallax can answer questions in any phrasing without needing the user
-    to name a module or table."""
     conn = get_conn()
     cursor = conn.cursor()
     scope_hq = branch_id == 0
@@ -2027,9 +2102,7 @@ def read_root():
 HTML_CONTENT = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
 
 # ---------------------------------------------------------------------------
-# PWA assets — installable app shell (manifest, service worker, icons).
-# These are static, non-sensitive files checked into the repo; no relation
-# to the authenticated /api/uploads/{filename} endpoint above.
+# PWA assets
 # ---------------------------------------------------------------------------
 
 MANIFEST_PATH = Path(__file__).with_name("manifest.json")
@@ -2044,8 +2117,6 @@ def get_manifest():
 
 @app.get("/sw.js")
 def get_service_worker():
-    # Served at root scope (not /icons or /static) so it can control the
-    # whole origin, which is required for the offline app-shell to work.
     return FileResponse(SERVICE_WORKER_PATH, media_type="application/javascript")
 
 
@@ -2053,7 +2124,7 @@ if ICONS_DIR.exists():
     app.mount("/icons", StaticFiles(directory=str(ICONS_DIR)), name="icons")
 
 # ---------------------------------------------------------------------------
-# Examination module (Results / History) — single canonical implementation
+# Examination module (Results / History)
 # ---------------------------------------------------------------------------
 
 EXAM_RESULTS_TABLE = """
