@@ -20,7 +20,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <style>
         /* --- Global reset & fonts --- */
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700;9..144,900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,700;0,800;0,900;1,700&family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&display=swap');
@@ -732,7 +731,6 @@
         let myDesignation = 'Owner';
         let myAllowedModules = [];
         let bulkImportModule = null;
-        let paymentsEnabled = false;   // populated from /api/payments/config on first fees view
         const ACCESS_HEADS = ['homepage', 'administrations', 'examination'];
         const HEAD_MODULES = {
             homepage: [['analytics', '◈', 'Analytics'], ['assistant', '✦', 'Parallax'], ['students', '🎓', 'Student Department'], ['teachers', '👨‍🏫', 'Teacher Department'], ['classrooms', '🏛️', 'Classroom Department'], ['users', '🔐', 'Manage Users']],
@@ -861,15 +859,11 @@
             document.getElementById('appContainer').classList.remove('hidden');
             initApp();
             applyResponsiveSidebarDefault();
-            // Pre-warm the payments config so the Pay Now button works the
-            // first time the Fees module is opened.
-            loadPaymentsConfig().catch(() => {});
         }
 
         async function handleLogout() {
             try { await authFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
             currentBranchId = null;
-            paymentsEnabled = false;
             document.getElementById('appContainer').classList.add('hidden');
             document.getElementById('authOverlay').classList.remove('hidden');
             document.getElementById('loginForm').classList.remove('hidden');
@@ -885,89 +879,6 @@
                 throw new Error('Session expired');
             }
             return res;
-        }
-
-        // ----- Payments (Razorpay) -----
-        async function loadPaymentsConfig() {
-            try {
-                const res = await authFetch('/api/payments/config');
-                if (!res.ok) { paymentsEnabled = false; return; }
-                const data = await res.json().catch(() => ({}));
-                paymentsEnabled = !!data.enabled;
-            } catch (_) { paymentsEnabled = false; }
-        }
-
-        async function initiatePayment(feeId) {
-            if (isGlobalView) return;
-            if (typeof window.Razorpay === 'undefined') {
-                alert('The payment library is still loading. Please try again in a moment.');
-                return;
-            }
-            // Refresh config once per call — cheap, and protects against the
-            // server-side keys being rotated between page loads.
-            await loadPaymentsConfig();
-            if (!paymentsEnabled) {
-                alert('Online payments are not configured for this institute. Please use "Mark Paid" instead.');
-                return;
-            }
-            let order;
-            try {
-                const orderRes = await authFetch('/api/payments/create-order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ fee_id: feeId })
-                });
-                const data = await orderRes.json().catch(() => ({}));
-                if (!orderRes.ok) {
-                    alert(apiErrorMessage(data.detail, 'Could not start payment.'));
-                    return;
-                }
-                order = data;
-            } catch (e) {
-                alert(e.message || 'Could not start payment.');
-                return;
-            }
-            const options = {
-                key: order.key_id,
-                amount: order.amount,
-                currency: order.currency,
-                name: (document.getElementById('headerInstituteName').textContent || '').trim() || 'I.B.E.X.',
-                description: order.student_name ? `Fee payment — ${order.student_name}` : 'Fee payment',
-                order_id: order.order_id,
-                theme: { color: '#d4af37' },
-                handler: async function (response) {
-                    try {
-                        const verifyRes = await authFetch('/api/payments/verify', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                fee_id: feeId,
-                                razorpay_order_id: response.razorpay_order_id,
-                                razorpay_payment_id: response.razorpay_payment_id,
-                                razorpay_signature: response.razorpay_signature,
-                            })
-                        });
-                        const data = await verifyRes.json().catch(() => ({}));
-                        if (verifyRes.ok && data.status === 'paid') {
-                            alert('Payment received. Fee has been marked as paid.');
-                            await loadModuleRecords('fees');
-                        } else {
-                            alert(apiErrorMessage(data.detail, 'Payment verification did not confirm. Please refresh and check the Fees list.'));
-                        }
-                    } catch (e) {
-                        alert(e.message || 'Payment verification failed.');
-                    }
-                },
-                modal: {
-                    ondismiss: function () { /* user closed checkout — no action */ }
-                },
-            };
-            const rzp = new window.Razorpay(options);
-            rzp.on('payment.failed', function (resp) {
-                const desc = resp && resp.error && resp.error.description ? resp.error.description : 'Payment failed.';
-                alert('Payment failed: ' + desc);
-            });
-            rzp.open();
         }
 
         async function initApp() {
@@ -988,7 +899,6 @@
                     document.getElementById('appContainer').classList.remove('hidden');
                     initApp();
                     applyResponsiveSidebarDefault();
-                    loadPaymentsConfig().catch(() => {});
                 }
             } catch (e) { /* not logged in */ }
         })();
@@ -1597,7 +1507,7 @@
                         else if (c.key === 'document' && !val) { val = `<span class="text-gray-600 text-xs">No File</span>`; }
                         return `<td class="p-4 font-medium">${val ?? ''}</td>`;
                     }).join('')}
-                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="initiatePayment(${r.id})" title="Collect payment online via Razorpay" class="gold-gradient-text font-bold text-xs mr-3">Pay Now</button><button onclick="markFeePaid(${r.id})" title="Mark paid manually" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${moduleName}', ${r.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${moduleName}', ${r.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
+                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="markFeePaid(${r.id})" title="Mark paid" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${moduleName}', ${r.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${moduleName}', ${r.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
                 </tr>
             `).join('');
         }
