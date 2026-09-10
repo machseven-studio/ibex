@@ -1498,6 +1498,9 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         unavailable = {str(d).strip() for d in t_config.get('unavailable_days', [])}
         if not teacher_name or target_lectures == 0: continue
         assigned_count = 0; used_days = []
+        # Track which lecture numbers this teacher has already been assigned on each day
+        used_lecture_nums_by_day = defaultdict(list)
+
         eligible_days = [d for d in days if d not in unavailable]
         if target_lectures <= 1:
             preferred_day_indices = [0] if eligible_days else []
@@ -1505,6 +1508,7 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
             preferred_day_indices = [round(i * (len(eligible_days) - 1) / (target_lectures - 1)) for i in range(target_lectures)]
         else:
             preferred_day_indices = [i % len(eligible_days) for i in range(target_lectures)] if eligible_days else []
+
         for lecture_index in range(target_lectures):
             candidates = []
             desired_idx = preferred_day_indices[lecture_index] if preferred_day_indices else 0
@@ -1516,18 +1520,52 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
                     room = free_room(day, timing.time_slot)
                     idx = day_index[day]
                     min_distance = min((abs(idx - used) for used in used_days), default=5)
-                    same_day_penalty = 1000 if idx in used_days and len(set(used_days)) < len(eligible_days) else 0
+
+                    # --- FIX: prevent the same teacher/subject from getting
+                    # multiple lectures back-to-back on one day while other
+                    # eligible days remain available.
+                    other_unused_days_exist = any(
+                        day_index[d] not in used_days for d in eligible_days
+                    )
+                    if idx in used_days and other_unused_days_exist:
+                        # Massive hard penalty - only chosen as an absolute last resort
+                        same_day_penalty = 1_000_000
+                    else:
+                        same_day_penalty = 0
+
+                    # Even when a day must be reused (all other days exhausted),
+                    # prefer non-consecutive lecture numbers so we don't stack
+                    # them back-to-back.
+                    consecutive_penalty = 0
+                    if idx in used_days:
+                        for other_lc in used_lecture_nums_by_day.get(idx, []):
+                            if abs(other_lc - timing.lecture_number) == 1:
+                                consecutive_penalty += 500
+
                     preferred_distance = abs(idx - day_index[desired_day]) if desired_day else 0
-                    score = (preferred_distance * 100 + same_day_penalty + batch_load[day] * 25 - min_distance * 2 + idx * 0.01 + timing.lecture_number * 0.001)
+                    score = (
+                        preferred_distance * 100
+                        + same_day_penalty
+                        + consecutive_penalty
+                        + batch_load[day] * 25
+                        - min_distance * 2
+                        + idx * 0.01
+                        + timing.lecture_number * 0.001
+                    )
                     candidates.append((score, day, timing, room))
             if not candidates: break
             _, day, timing, room = min(candidates, key=lambda x: x[0])
             cursor.execute("""INSERT INTO timetables_slots (branch_id, batch_name, day, time_slot, lecture_number, subject, teacher, room) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                            (req.branch_id, req.batch_name, day, timing.time_slot, timing.lecture_number, subject, teacher_name, room))
             generated_slots.append({"day": day, "time_slot": timing.time_slot, "lecture_number": timing.lecture_number, "subject": subject, "teacher": teacher_name, "room": room})
-            assigned_count += 1; batch_load[day] += 1; used_days.append(day_index[day])
+            assigned_count += 1
+            batch_load[day] += 1
+            used_days.append(day_index[day])
+            used_lecture_nums_by_day[day_index[day]].append(timing.lecture_number)
+
         if assigned_count < target_lectures:
             warnings.append(f"{teacher_name}: only scheduled {assigned_count}/{target_lectures} lectures (not enough free day/time slots without a conflict).")
+
     cursor.execute("SELECT id FROM timetable_configs WHERE branch_id = %s AND batch_name = %s", (req.branch_id, req.batch_name))
     existing_config = cursor.fetchone()
     timings_json = json.dumps([t.dict() for t in req.timings])
@@ -1600,6 +1638,9 @@ class SeatingGenerateRequest(BaseModel):
     room_number: str
     rows: int
     columns: int
+    # Only seat students belonging to these batches. If omitted/empty, all
+    # students in the branch are considered (legacy behaviour).
+    batches: list[str] | None = None
 
 
 def _build_seating_layout(students, rows, columns):
@@ -1676,14 +1717,38 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
     if requested_capacity > room_capacity:
         conn.close(); raise HTTPException(status_code=400, detail=f"Grid capacity ({requested_capacity}) exceeds room capacity ({room_capacity}).")
     cursor = conn.cursor()
+
+    # Determine which students are eligible based on selected batches.
+    # If no batches are provided, fall back to legacy behaviour (all students).
+    selected_batches = [str(b).strip() for b in (req.batches or []) if str(b).strip()]
+
+    if selected_batches:
+        placeholders = ", ".join(["%s"] * len(selected_batches))
+        cursor.execute(
+            f"""SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number
+                FROM students
+                WHERE branch_id = %s AND batch IN ({placeholders})
+                ORDER BY id""",
+            (req.branch_id, *selected_batches),
+        )
+    else:
+        cursor.execute(
+            "SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number FROM students WHERE branch_id = %s",
+            (req.branch_id,),
+        )
+    student_rows = [dict(r) for r in cursor.fetchall()]
+
+    if not student_rows:
+        conn.close()
+        raise HTTPException(status_code=400, detail="No students were found for the selected batch(es).")
+
     cursor.execute("SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s", (req.branch_id, req.exam_date, room_number))
     old_room = cursor.fetchone(); old_student_ids = set()
     if old_room:
         try: old_student_ids = {int(a["student_id"]) for a in json.loads(old_room["assignments_json"] or "[]") if a.get("student_id") is not None}
         except (TypeError, ValueError, KeyError): pass
     cursor.execute("DELETE FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s", (req.branch_id, req.exam_date, room_number))
-    cursor.execute("SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number FROM students WHERE branch_id = %s", (req.branch_id,))
-    student_rows = [dict(r) for r in cursor.fetchall()]
+
     cursor.execute("SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s", (req.branch_id, req.exam_date))
     assigned_elsewhere = set()
     for row in cursor.fetchall():
@@ -1693,13 +1758,13 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
     remaining_students = [s for s in student_rows if int(s["id"]) not in assigned_elsewhere]
     random.shuffle(remaining_students)
     if len(remaining_students) < requested_capacity:
-        conn.close(); raise HTTPException(status_code=400, detail=f"Only {len(remaining_students)} unassigned students remain for this exam; {requested_capacity} seats were requested.")
+        conn.close(); raise HTTPException(status_code=400, detail=f"Only {len(remaining_students)} unassigned student(s) remain for the selected batch(es); {requested_capacity} seats were requested.")
     assignments = _build_seating_layout(remaining_students, req.rows, req.columns)
     cursor.execute("""INSERT INTO exam_seatings (branch_id, exam_date, room_number, rows, columns, assignments_json, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                    (req.branch_id, req.exam_date, room_number, req.rows, req.columns, json.dumps(assignments), datetime.utcnow().isoformat()))
     layout_id = cursor.fetchone()[0]
     conn.commit(); conn.close()
-    audit_write(institute, req.branch_id, "GENERATE_SEATING", None, {"id": layout_id, "exam_date": req.exam_date, "room_number": room_number, "rows": req.rows, "columns": req.columns, "assignments": assignments})
+    audit_write(institute, req.branch_id, "GENERATE_SEATING", None, {"id": layout_id, "exam_date": req.exam_date, "room_number": room_number, "rows": req.rows, "columns": req.columns, "batches": selected_batches, "assignments": assignments})
     return {"status": "success", "id": layout_id, "assignments": assignments}
 
 
@@ -2272,11 +2337,11 @@ def _parallax_call_gemini(context: str, question: str) -> str:
         "Answer the user's question using ONLY the data given below. The question may be phrased "
         "as a command, a fragment, casual text, or any other format — always answer it as a question "
         "about the data. If the data doesn't contain the answer, say so plainly instead of guessing. "
-        "Be concise and factual; use short lists or numbers where that's clearer than prose.\n\n"
-        f"=== INSTITUTE DATA ===\n{context}\n\n=== QUESTION ===\n{question}"
+        "Be concise and factual; use short lists or numbers where that's clearer than prose. "
+        "Do not use any markdown emphasis, italics, bold, or asterisks in your reply."
     )
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+    payload = json.dumps({"contents": [{"parts": [{"text": prompt + f"\n\n=== INSTITUTE DATA ===\n{context}\n\n=== QUESTION ===\n{question}"}]}]}).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
