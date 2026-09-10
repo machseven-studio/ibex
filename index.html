@@ -140,12 +140,10 @@
         #moduleSidebar.sidebar-collapsed #sidebarCollapseButton {
             transform: translateX(calc(100% + 10px));
         }
-        /* When collapsed, float the button on the left edge of main */
         #moduleSidebar.sidebar-collapsed + #mainContent {
             margin-left: 0;
         }
 
-        /* Main content – expanded when sidebar collapsed */
         #mainContent {
             flex: 1;
             padding: 1.5rem 2rem;
@@ -224,7 +222,6 @@
         .global-readonly .gold-bg { opacity: .45; pointer-events: none; }
         @media (min-width: 1024px) { #mainContent { padding: 1.5rem 2rem; } }
 
-        /* --- Sidebar toggle (header button) --- */
         #mobileSidebarToggle {
             display: flex;
             width: 34px;
@@ -254,7 +251,6 @@
             #headerInstituteName { font-size: 1.5rem !important; }
             .user-info-box { padding-left: 0.75rem; margin-left: 0.25rem; min-height: auto; }
 
-            /* Sidebar becomes a slide-in overlay instead of pushing content */
             #moduleSidebar {
                 position: fixed;
                 top: 0;
@@ -295,7 +291,6 @@
         .head-chevron { transition: transform .15s ease; }
         .rotate-180 { transform: rotate(180deg); }
 
-        /* Remove icons from sidebar items */
         #moduleGroups .sidebar-item > span:first-child {
             display: none !important;
         }
@@ -304,7 +299,6 @@
             gap: 0 !important;
         }
 
-        /* Parallax search */
         .parallax-search-shell {
             margin-top: 1rem;
             padding: 18px;
@@ -391,7 +385,6 @@
             font-size: 10px;
         }
 
-        /* Branch selector layout */
         .branch-selector-stack {
             display: flex;
             flex-direction: column;
@@ -406,7 +399,6 @@
             flex: 0 0 auto;
         }
 
-        /* User info alignment */
         .user-info-box {
             display: flex;
             flex-direction: column;
@@ -419,7 +411,6 @@
             min-height: 60px;
         }
 
-        /* Exam modules – use glass-panel background */
         #examV2Root .examv2-card,
         #examUpgradeRoot > div {
             border-color: rgba(212,175,55,.18);
@@ -440,7 +431,6 @@
             border-bottom: 1px solid #181818;
         }
 
-        /* WhatsApp module */
         .whatsapp-card {
             background: linear-gradient(160deg, rgba(40, 8, 8, 0.88), rgba(10, 2, 2, 0.96));
             border: 1px solid rgba(212,175,55,.18);
@@ -461,7 +451,7 @@
 </head>
 <body class="min-h-screen flex flex-col">
 
-    <!-- LOGIN / SIGNUP OVERLAY (unchanged) -->
+    <!-- LOGIN / SIGNUP OVERLAY -->
     <div id="authOverlay" class="fixed inset-0 z-50 bg-[#0a0202]/80 flex items-center justify-center p-4">
         <div class="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(212,175,55,0.06)_0,transparent_70%)]"></div>
         <div class="glass-panel w-full max-w-md p-8 rounded-2xl shadow-2xl relative z-10 border gold-border">
@@ -567,8 +557,7 @@
         </div>
     </div>
 
-    <!-- MODALS (unchanged) -->
-    <!-- Rename Institute Modal -->
+    <!-- MODALS -->
     <div id="renameInstituteModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -583,7 +572,6 @@
         </div>
     </div>
 
-    <!-- Add Staff User Modal -->
     <div id="userModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -618,7 +606,6 @@
         </div>
     </div>
 
-    <!-- Bulk Import Modal -->
     <div id="bulkImportModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -635,7 +622,6 @@
         </div>
     </div>
 
-    <!-- Generic Add Record Modal -->
     <div id="recordModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-lg max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -654,7 +640,6 @@
         </div>
     </div>
 
-    <!-- Timetable Slot Edit Modal -->
     <div id="timetableSlotEditModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -676,7 +661,6 @@
         </div>
     </div>
 
-    <!-- Add Branch Modal -->
     <div id="branchModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-5 sm:p-8 rounded-2xl w-full max-w-md max-h-[88vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-center mb-6">
@@ -690,7 +674,6 @@
         </div>
     </div>
 
-    <!-- Attendance History Modal -->
     <div id="attendanceHistoryModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-8 rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-start mb-2 gap-4">
@@ -706,7 +689,6 @@
         </div>
     </div>
 
-    <!-- Central Analytics Modal -->
     <div id="centralAnalyticsModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-50 p-4">
         <div class="glass-panel border gold-border p-8 rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div class="flex justify-between items-start mb-6 gap-4">
@@ -750,6 +732,7 @@
         let myDesignation = 'Owner';
         let myAllowedModules = [];
         let bulkImportModule = null;
+        let paymentsEnabled = false;   // populated from /api/payments/config on first fees view
         const ACCESS_HEADS = ['homepage', 'administrations', 'examination'];
         const HEAD_MODULES = {
             homepage: [['analytics', '◈', 'Analytics'], ['assistant', '✦', 'Parallax'], ['students', '🎓', 'Student Department'], ['teachers', '👨‍🏫', 'Teacher Department'], ['classrooms', '🏛️', 'Classroom Department'], ['users', '🔐', 'Manage Users']],
@@ -757,16 +740,11 @@
             examination: [['seating', '', 'Seating'], ['invigilation', '', 'Invigilation'], ['results', '▣', 'Results'], ['history', '◷', 'History']]
         };
         const MODULE_HEAD = Object.fromEntries(Object.entries(HEAD_MODULES).flatMap(([h, ms]) => ms.map(([m]) => [m, h])));
-        // Homepage's children (Analytics, Parallax, the 3 departments, Manage
-        // Users) stay owner-only — only Administrations' and Examination's
-        // children can be individually granted to a staff login.
         const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination].map(([m]) => m);
 
         // ----- Utility -----
         function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
 
-        // Turns any API error shape (string / dict / FastAPI 422 validation
-        // array) into a plain readable string instead of "[object Object]".
         function apiErrorMessage(detail, fallback) {
             if (typeof detail === 'string' && detail.trim()) return detail;
             if (Array.isArray(detail) && detail.length) {
@@ -883,11 +861,15 @@
             document.getElementById('appContainer').classList.remove('hidden');
             initApp();
             applyResponsiveSidebarDefault();
+            // Pre-warm the payments config so the Pay Now button works the
+            // first time the Fees module is opened.
+            loadPaymentsConfig().catch(() => {});
         }
 
         async function handleLogout() {
             try { await authFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
             currentBranchId = null;
+            paymentsEnabled = false;
             document.getElementById('appContainer').classList.add('hidden');
             document.getElementById('authOverlay').classList.remove('hidden');
             document.getElementById('loginForm').classList.remove('hidden');
@@ -903,6 +885,89 @@
                 throw new Error('Session expired');
             }
             return res;
+        }
+
+        // ----- Payments (Razorpay) -----
+        async function loadPaymentsConfig() {
+            try {
+                const res = await authFetch('/api/payments/config');
+                if (!res.ok) { paymentsEnabled = false; return; }
+                const data = await res.json().catch(() => ({}));
+                paymentsEnabled = !!data.enabled;
+            } catch (_) { paymentsEnabled = false; }
+        }
+
+        async function initiatePayment(feeId) {
+            if (isGlobalView) return;
+            if (typeof window.Razorpay === 'undefined') {
+                alert('The payment library is still loading. Please try again in a moment.');
+                return;
+            }
+            // Refresh config once per call — cheap, and protects against the
+            // server-side keys being rotated between page loads.
+            await loadPaymentsConfig();
+            if (!paymentsEnabled) {
+                alert('Online payments are not configured for this institute. Please use "Mark Paid" instead.');
+                return;
+            }
+            let order;
+            try {
+                const orderRes = await authFetch('/api/payments/create-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fee_id: feeId })
+                });
+                const data = await orderRes.json().catch(() => ({}));
+                if (!orderRes.ok) {
+                    alert(apiErrorMessage(data.detail, 'Could not start payment.'));
+                    return;
+                }
+                order = data;
+            } catch (e) {
+                alert(e.message || 'Could not start payment.');
+                return;
+            }
+            const options = {
+                key: order.key_id,
+                amount: order.amount,
+                currency: order.currency,
+                name: (document.getElementById('headerInstituteName').textContent || '').trim() || 'I.B.E.X.',
+                description: order.student_name ? `Fee payment — ${order.student_name}` : 'Fee payment',
+                order_id: order.order_id,
+                theme: { color: '#d4af37' },
+                handler: async function (response) {
+                    try {
+                        const verifyRes = await authFetch('/api/payments/verify', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                fee_id: feeId,
+                                razorpay_order_id: response.razorpay_order_id,
+                                razorpay_payment_id: response.razorpay_payment_id,
+                                razorpay_signature: response.razorpay_signature,
+                            })
+                        });
+                        const data = await verifyRes.json().catch(() => ({}));
+                        if (verifyRes.ok && data.status === 'paid') {
+                            alert('Payment received. Fee has been marked as paid.');
+                            await loadModuleRecords('fees');
+                        } else {
+                            alert(apiErrorMessage(data.detail, 'Payment verification did not confirm. Please refresh and check the Fees list.'));
+                        }
+                    } catch (e) {
+                        alert(e.message || 'Payment verification failed.');
+                    }
+                },
+                modal: {
+                    ondismiss: function () { /* user closed checkout — no action */ }
+                },
+            };
+            const rzp = new window.Razorpay(options);
+            rzp.on('payment.failed', function (resp) {
+                const desc = resp && resp.error && resp.error.description ? resp.error.description : 'Payment failed.';
+                alert('Payment failed: ' + desc);
+            });
+            rzp.open();
         }
 
         async function initApp() {
@@ -923,6 +988,7 @@
                     document.getElementById('appContainer').classList.remove('hidden');
                     initApp();
                     applyResponsiveSidebarDefault();
+                    loadPaymentsConfig().catch(() => {});
                 }
             } catch (e) { /* not logged in */ }
         })();
@@ -960,7 +1026,6 @@
         function openAddBranchModal() { if (isGlobalView) return; document.getElementById('branchModal').classList.remove('hidden'); }
         function closeAddBranchModal() { document.getElementById('branchModal').classList.add('hidden'); document.getElementById('newBranchName').value = ''; }
 
-        // ---- Edit / Delete branch (exposed globally) ----
         window.editBranchRuntime = async function() {
             const b = branches.find(x => Number(x.id) === Number(currentBranchId));
             if (!b || myPermission === 'read_only') return;
@@ -995,9 +1060,6 @@
             if (!groups) return;
             groups.innerHTML = ACCESS_HEADS.filter(head => {
                 if (isOwner) return true;
-                // Homepage is always boss-only; Administrations/Examination
-                // show up for staff only if they hold at least one of that
-                // head's individual modules.
                 if (head === 'homepage') return false;
                 return HEAD_MODULES[head].some(([m]) => myAllowedModules.includes(m));
             }).map(head => {
@@ -1042,8 +1104,6 @@
                 refreshCurrentModule();
                 return;
             }
-            // Administrations / Examination: reveal their child modules instead
-            // of redirecting to the homepage.
             toggleModuleHead(head);
         }
 
@@ -1064,7 +1124,6 @@
         }
         window.addEventListener('resize', applyResponsiveSidebarDefault);
 
-        // ----- Auto-hide top bar on scroll -----
         (function setupHeaderAutoHide() {
             const header = document.getElementById('appHeader');
             if (!header) return;
@@ -1087,10 +1146,6 @@
                     lastTop = top;
                 }
             }
-            // #appContainer is min-h-screen (grows with content), so the page
-            // itself scrolls on window/documentElement — not #mainContent.
-            // Listen on both so this keeps working regardless of which one
-            // ends up with the actual overflow.
             window.addEventListener('scroll', onScroll, { passive: true });
             const scroller = document.getElementById('mainContent');
             if (scroller) scroller.addEventListener('scroll', onScroll, { passive: true });
@@ -1191,7 +1246,7 @@
             return data;
         }
 
-        // ----- Analytics module (unchanged) -----
+        // ----- Analytics module -----
         async function renderAnalyticsModule(container) {
             const renderToken = Symbol('analytics-render');
             window.__analyticsRenderToken = renderToken;
@@ -1285,7 +1340,7 @@
                     <div class="glass-panel border gold-border p-6 rounded-2xl">
                         <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Lectures · This Week</h3><div class="text-xs text-gray-500">${l.scheduled_this_week || 0} scheduled · ${l.logged_last_7_days || 0} logged</div></div>
                         <div class="space-y-4">${days.map(x => analyticsBar(x.count || 0, maxDay, x.day, `${x.count || 0} lectures`)).join('')}</div>
-                        <p class="text-[10px] text-gray-600 mt-5">“Logged” counts syllabus lecture entries recorded in the last seven days; “scheduled” counts generated timetable slots.</p>
+                        <p class="text-[10px] text-gray-600 mt-5">"Logged" counts syllabus lecture entries recorded in the last seven days; "scheduled" counts generated timetable slots.</p>
                     </div>
                     <div class="glass-panel border gold-border p-6 rounded-2xl">
                         <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Attendance · By Batch</h3><span class="text-xs text-gray-500">current branch</span></div>
@@ -1364,7 +1419,7 @@
             } catch (e) { console.error(e); }
         }
 
-        // ----- PDF / Excel exports (unchanged) -----
+        // ----- PDF / Excel exports -----
         function ibexPdfHeader(doc, title, subtitle) {
             const pageWidth = doc.internal.pageSize.getWidth();
             const pageHeight = doc.internal.pageSize.getHeight();
@@ -1542,7 +1597,7 @@
                         else if (c.key === 'document' && !val) { val = `<span class="text-gray-600 text-xs">No File</span>`; }
                         return `<td class="p-4 font-medium">${val ?? ''}</td>`;
                     }).join('')}
-                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="markFeePaid(${r.id})" title="Mark paid" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${moduleName}', ${r.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${moduleName}', ${r.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
+                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="initiatePayment(${r.id})" title="Collect payment online via Razorpay" class="gold-gradient-text font-bold text-xs mr-3">Pay Now</button><button onclick="markFeePaid(${r.id})" title="Mark paid manually" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${moduleName}', ${r.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${moduleName}', ${r.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
                 </tr>
             `).join('');
         }
@@ -1754,7 +1809,6 @@
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Present</div><div class="text-xl font-black text-green-400 mt-1">${data.present_count}</div></div>
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Absent</div><div class="text-xl font-black text-red-400 mt-1">${data.absent_count}</div></div>
                 `;
-                // Fix: ensure we display strings, not objects
                 const historyRows = data.history.map(h => ({
                     date: String(h.date || ''),
                     status: String(h.status || '')
@@ -1798,9 +1852,7 @@
             if (res.ok) {
                 attendanceMarksToday[studentName] = status;
                 renderAttendanceStudentList();
-                // If absent, trigger WhatsApp notification (backend will handle)
                 if (status === 'Absent') {
-                    // Call backend to send WhatsApp message
                     try {
                         await authFetch('/api/whatsapp/send-absence', {
                             method: 'POST',
@@ -2749,7 +2801,6 @@
                     </div>
                 </div>
             `;
-            // Optionally load logs from backend (we'll keep it simple for now)
         }
 
         async function sendFeeReminders() {
@@ -2775,8 +2826,6 @@
 
         // ===== Exam Results & History (global) =====
         window.renderResults = async function() {
-            // The exam results module is already defined in the embedded script below.
-            // We'll just call it.
             if (typeof renderResults === 'function') {
                 await renderResults();
             } else {
@@ -2791,8 +2840,6 @@
                 document.getElementById('mainContent').innerHTML = '<div class="glass-panel border gold-border p-10 rounded-2xl text-center text-gray-500">History module loading…</div>';
             }
         };
-
-        // ---- Parallax homepage search bar removed per request; Parallax module itself is unaffected ----
 
         // ---- Delete Parallax history (runtime) ----
         const oldParallaxThread = renderParallaxThread;
@@ -2821,7 +2868,7 @@
         console.log('I.B.E.X. fully loaded – all modules fixed.');
     </script>
 
-    <!-- Embedded exam results/history scripts (unchanged) -->
+    <!-- Embedded exam results/history scripts -->
     <script>
         // === EXAM RESULTS / HISTORY UPGRADE ===
         (() => {
@@ -2907,7 +2954,7 @@
         })();
     </script>
 
-    <!-- PWA: register service worker for installable, app-like behavior -->
+    <!-- PWA: register service worker -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
