@@ -19,32 +19,25 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 
-app = FastAPI(title="I.B.E.X.", version="4.1.0")
+app = FastAPI(title="I.B.E.X.", version="5.0.0")
 
 DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_URL")
-# Uploads are stored outside the app's static/served root and are only ever
-# reachable through the authenticated /api/uploads/{filename} endpoint below -
-# there is no longer a public StaticFiles mount for this directory.
 UPLOAD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "private_uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-SESSION_LIFETIME_DAYS = 7
+# --- PERSISTENT AUTH -------------------------------------------------------
+SESSION_LIFETIME_DAYS = 30
 SESSION_COOKIE_NAME = "alg_session"
 IS_PRODUCTION = os.getenv("ENV", "production").lower() != "development"
-PBKDF2_ITERATIONS = 200_000  # legacy - kept only to verify/upgrade old hashes
+PBKDF2_ITERATIONS = 200_000
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".doc", ".docx"}
 ALLOWED_UPLOAD_MIME_TYPES = {
     "application/pdf", "image/jpeg", "image/png",
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
-MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
-# ---------------------------------------------------------------------------
-# Login rate limiting (in-memory, per process). Keyed by client IP + email so
-# one abusive account can't be used to lock out a shared office IP, and vice
-# versa. Swap for a Redis-backed limiter if you run multiple worker processes.
-# ---------------------------------------------------------------------------
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 15 * 60
 _login_attempts: dict[str, list[float]] = defaultdict(list)
@@ -65,8 +58,7 @@ def check_login_rate_limit(request: "Request", email: str):
 
 
 def record_failed_login(request: "Request", email: str):
-    key = _rate_limit_key(request, email)
-    _login_attempts[key].append(time.time())
+    _login_attempts[_rate_limit_key(request, email)].append(time.time())
 
 
 def clear_login_attempts(request: "Request", email: str):
@@ -79,7 +71,7 @@ def set_session_cookie(response: "Response", token: str):
         value=token,
         httponly=True,
         secure=IS_PRODUCTION,
-        samesite="strict",
+        samesite="lax",
         max_age=SESSION_LIFETIME_DAYS * 86400,
         path="/",
     )
@@ -88,26 +80,32 @@ def set_session_cookie(response: "Response", token: str):
 def clear_session_cookie(response: "Response"):
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
 
+
 VALID_MODULES = ['students', 'teachers', 'classrooms', 'syllabus', 'attendance', 'invigilation', 'fees']
 SEATING_MODULE = 'seating'
 
-ACCESS_HEADS = ['homepage', 'administrations', 'examination']
+# --- 4-HEAD NAVIGATION TAXONOMY -------------------------------------------
+ACCESS_HEADS = ['homepage', 'administrations', 'examination', 'front_office']
 MODULE_HEAD = {
     'analytics': 'homepage', 'assistant': 'homepage', 'students': 'homepage',
-    'teachers': 'homepage', 'classrooms': 'homepage', 'users': 'homepage',
+    'teachers': 'homepage', 'classrooms': 'homepage',
+    'journal': 'homepage', 'audit_history': 'homepage',
     'attendance': 'administrations', 'syllabus': 'administrations',
-    'timetables': 'administrations', 'fees': 'administrations', 'whatsapp': 'administrations',
-    'seating': 'examination', 'invigilation': 'examination', 'results': 'examination', 'history': 'examination',
+    'timetables': 'administrations', 'whatsapp': 'administrations',
+    'seating': 'examination', 'invigilation': 'examination',
+    'results': 'examination', 'history': 'examination',
+    'inquiry': 'front_office', 'fees': 'front_office', 'users': 'front_office',
 }
-STAFF_GRANTABLE_MODULES = [m for m, h in MODULE_HEAD.items() if h in ('administrations', 'examination')]
+OWNER_ONLY_MODULES = {'users', 'journal', 'audit_history'}
+STAFF_GRANTABLE_MODULES = [
+    m for m, h in MODULE_HEAD.items()
+    if h in ('administrations', 'examination', 'front_office') and m not in OWNER_ONLY_MODULES
+]
 ALL_ACCESS_MODULES = list(MODULE_HEAD.keys())
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-
 DESIGNATION_PRESETS = ['Admin', 'Accountant', 'Teacher', 'Head', 'Clerk', 'Custom']
-
-# WhatsApp configuration
 WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
@@ -145,6 +143,28 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS invigilation (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, teacher_name TEXT, exam_date TEXT, room TEXT, document TEXT)""",
         """CREATE TABLE IF NOT EXISTS fees (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, student_name TEXT, amount_inr NUMERIC(12,2), status TEXT, due_date TEXT, document TEXT, utr_reference TEXT, paid_at TIMESTAMPTZ, paid_by INTEGER)""",
         """CREATE TABLE IF NOT EXISTS audit_log (id BIGSERIAL PRIMARY KEY, timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(), user_id INTEGER, branch_id INTEGER, action_type TEXT NOT NULL, before_after_payload JSONB NOT NULL DEFAULT '{}'::jsonb)""",
+        """CREATE TABLE IF NOT EXISTS journal_entries (
+            id SERIAL PRIMARY KEY,
+            institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+            branch_id INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+            author_user_id INTEGER,
+            author_name TEXT,
+            content TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS inquiries (
+            id SERIAL PRIMARY KEY,
+            branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            phone TEXT,
+            email TEXT,
+            source TEXT,
+            interested_in TEXT,
+            status TEXT NOT NULL DEFAULT 'New',
+            notes TEXT,
+            follow_up_date TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )""",
     ]
     for stmt in statements:
         cur.execute(stmt)
@@ -152,16 +172,6 @@ def init_db():
         "ALTER TABLE branches ADD COLUMN IF NOT EXISTS tenant_id INTEGER",
         "UPDATE branches SET tenant_id = institute_id WHERE tenant_id IS NULL",
         "ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS permission TEXT NOT NULL DEFAULT 'read_only'",
-        """DO $$
-        BEGIN
-            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'staff_users' AND column_name = 'permissions') THEN
-                EXECUTE $sql$UPDATE staff_users SET permission = CASE
-                    WHEN lower(COALESCE(permissions::text, '')) LIKE '%read_only%' THEN 'read_only'
-                    WHEN lower(COALESCE(permissions::text, '')) LIKE '%edit%' THEN 'edit'
-                    ELSE permission
-                END WHERE permission IS NULL OR permission = 'read_only'$sql$;
-            END IF;
-        END $$;""",
         "ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS designation TEXT",
         "ALTER TABLE staff_users ADD COLUMN IF NOT EXISTS module_access TEXT",
         "ALTER TABLE students ADD COLUMN IF NOT EXISTS email TEXT",
@@ -201,17 +211,6 @@ def init_db():
         "ALTER TABLE timetable_configs ADD COLUMN IF NOT EXISTS timings_json TEXT",
         "ALTER TABLE timetable_configs ADD COLUMN IF NOT EXISTS teachers_config_json TEXT",
         "ALTER TABLE timetable_configs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
-        """DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = 'timetable_configs'
-                  AND column_name = 'config'
-            ) THEN
-                EXECUTE 'ALTER TABLE timetable_configs ALTER COLUMN config DROP NOT NULL';
-            END IF;
-        END $$;""",
         "ALTER TABLE exam_seatings ADD COLUMN IF NOT EXISTS exam_date TEXT",
         "ALTER TABLE exam_seatings ADD COLUMN IF NOT EXISTS room_number TEXT",
         "ALTER TABLE exam_seatings ADD COLUMN IF NOT EXISTS rows INTEGER",
@@ -242,6 +241,9 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_timetable_branch_day_slot ON timetables_slots(branch_id, day, time_slot)",
         "CREATE INDEX IF NOT EXISTS idx_fees_branch_status ON fees(branch_id, status)",
         "CREATE INDEX IF NOT EXISTS idx_audit_branch_timestamp ON audit_log(branch_id, timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_journal_institute_created ON journal_entries(institute_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_inquiries_branch_created ON inquiries(branch_id, created_at DESC)",
     ]:
         cur.execute(stmt)
     conn.commit()
@@ -286,10 +288,17 @@ def create_session(institute_id: int, staff_user_id: int = None) -> str:
         "INSERT INTO sessions (token, institute_id, staff_user_id, expires_at) VALUES (%s, %s, %s, %s)",
         (token, institute_id, staff_user_id, expires_at),
     )
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     audit_system(institute_id, None, "CREATE_SESSION", None, {"staff_user_id": staff_user_id})
     return token
+
+
+def touch_session(token: str):
+    """Roll the session expiry forward - keeps users logged in across browser restarts."""
+    conn = get_conn(); cur = conn.cursor()
+    new_expiry = (datetime.utcnow() + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
+    cur.execute("UPDATE sessions SET expires_at = %s WHERE token = %s", (new_expiry, token))
+    conn.commit(); conn.close()
 
 
 class CurrentInstitute(BaseModel):
@@ -307,6 +316,8 @@ class CurrentInstitute(BaseModel):
 def check_module_access(institute: "CurrentInstitute", module: str):
     if institute.is_owner:
         return
+    if module in OWNER_ONLY_MODULES:
+        raise HTTPException(status_code=403, detail=f"Only the institute owner can access {module.replace('_', ' ').title()}")
     if module not in institute.allowed_modules:
         raise HTTPException(status_code=403, detail=f"Your account does not have access to the {module.title()} module")
 
@@ -329,8 +340,7 @@ def get_current_institute(alg_session: str | None = Cookie(default=None, alias=S
     now_utc = datetime.now(timezone.utc) if expires_at.tzinfo else datetime.utcnow()
     if expires_at < now_utc:
         cursor.execute("DELETE FROM sessions WHERE token = %s", (token,))
-        conn.commit()
-        conn.close()
+        conn.commit(); conn.close()
         audit_system(session["institute_id"], None, "EXPIRE_SESSION", {"token": "redacted"}, None)
         raise HTTPException(status_code=401, detail="Session expired, please log in again")
 
@@ -352,6 +362,7 @@ def get_current_institute(alg_session: str | None = Cookie(default=None, alias=S
             allowed = json.loads(raw_access) if raw_access else []
         except (TypeError, ValueError):
             allowed = []
+        touch_session(token)
         return CurrentInstitute(
             user_id=staff["id"],
             id=institute["id"],
@@ -365,6 +376,7 @@ def get_current_institute(alg_session: str | None = Cookie(default=None, alias=S
         )
 
     conn.close()
+    touch_session(token)
     return CurrentInstitute(
         user_id=institute["id"],
         id=institute["id"],
@@ -389,11 +401,9 @@ def require_owner(institute: CurrentInstitute = Depends(get_current_institute)) 
 
 
 def verify_branch_ownership(branch_id: int, institute_id: int):
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT id FROM branches WHERE id = %s AND tenant_id = %s", (branch_id, institute_id))
-    row = cursor.fetchone()
-    conn.close()
+    row = cursor.fetchone(); conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Branch not found")
 
@@ -450,11 +460,8 @@ class LoginRequest(BaseModel):
 def signup(req: SignupRequest, response: Response):
     if len(req.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-
     password_hash = hash_password(req.password)
-
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     try:
         cursor.execute(
             """INSERT INTO institutes (institute_name, full_name, email, password_hash, password_salt, created_at)
@@ -472,7 +479,6 @@ def signup(req: SignupRequest, response: Response):
         raise HTTPException(status_code=400, detail="An account with this email already exists")
     conn.close()
     audit_system(institute_id, None, "CREATE_INSTITUTE", None, {"institute_id": institute_id, "starter_branch": "Main Campus"})
-
     token = create_session(institute_id)
     set_session_cookie(response, token)
     return {
@@ -488,11 +494,9 @@ def signup(req: SignupRequest, response: Response):
 @app.post("/api/auth/login")
 def login(req: LoginRequest, request: Request, response: Response):
     check_login_rate_limit(request, req.email)
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT * FROM institutes WHERE email = %s", (req.email.lower(),))
     institute = cursor.fetchone()
-
     invalid = HTTPException(status_code=401, detail="Invalid email or password")
 
     if institute:
@@ -560,13 +564,21 @@ def whoami(institute: CurrentInstitute = Depends(get_current_institute)):
     }
 
 
+@app.post("/api/auth/refresh")
+def refresh_session(response: Response, institute: CurrentInstitute = Depends(get_current_institute),
+                    alg_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME)):
+    if alg_session:
+        touch_session(alg_session)
+        set_session_cookie(response, alg_session)
+    return {"status": "refreshed", "expires_in_days": SESSION_LIFETIME_DAYS}
+
+
 @app.post("/api/auth/logout")
 def logout(response: Response, alg_session: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME)):
     if alg_session:
         conn = get_conn()
         cur = conn.cursor(); cur.execute("DELETE FROM sessions WHERE token = %s", (alg_session,))
-        conn.commit()
-        conn.close()
+        conn.commit(); conn.close()
         audit_system(None, None, "LOGOUT_SESSION", None, {"token": "redacted"})
     clear_session_cookie(response)
     return {"status": "logged out"}
@@ -594,7 +606,7 @@ def update_institute_name(req: InstituteNameUpdate, institute: CurrentInstitute 
 
 
 # ---------------------------------------------------------------------------
-# Staff users ("Manage Users") - owner-only administration
+# Staff users
 # ---------------------------------------------------------------------------
 
 class StaffUserCreate(BaseModel):
@@ -623,10 +635,7 @@ def _validate_modules(modules: list):
 @app.get("/api/users")
 def list_staff_users(institute: CurrentInstitute = Depends(require_owner)):
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        # FIX: was selecting "permissions" (plural) which does not exist.
-        # The canonical column is "permission" (singular).
+        conn = get_conn(); cursor = conn.cursor()
         cursor.execute(
             "SELECT id, full_name, email, permission, designation, module_access, created_at FROM staff_users WHERE institute_id = %s",
             (institute.id,),
@@ -656,11 +665,8 @@ def add_staff_user(req: StaffUserCreate, institute: CurrentInstitute = Depends(r
     if not req.designation.strip():
         raise HTTPException(status_code=400, detail="Designation is required")
     _validate_modules(req.modules)
-
     password_hash = hash_password(req.password)
-
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     try:
         cursor.execute(
             """INSERT INTO staff_users (institute_id, full_name, email, password_hash, password_salt, permission, designation, module_access, created_at)
@@ -680,11 +686,9 @@ def add_staff_user(req: StaffUserCreate, institute: CurrentInstitute = Depends(r
 
 
 def verify_staff_ownership(user_id: int, institute_id: int):
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT id FROM staff_users WHERE id = %s AND institute_id = %s", (user_id, institute_id))
-    row = cursor.fetchone()
-    conn.close()
+    row = cursor.fetchone(); conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -692,31 +696,27 @@ def verify_staff_ownership(user_id: int, institute_id: int):
 @app.patch("/api/users/{user_id}")
 def update_staff_permission(user_id: int, req: StaffPermissionUpdate, institute: CurrentInstitute = Depends(require_owner)):
     verify_staff_ownership(user_id, institute.id)
-    pre_conn = get_conn(); pre_cur = pre_conn.cursor(); pre_cur.execute("SELECT permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,)); before_user = pre_cur.fetchone(); pre_conn.close()
+    pre_conn = get_conn(); pre_cur = pre_conn.cursor()
+    pre_cur.execute("SELECT permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
+    before_user = pre_cur.fetchone(); pre_conn.close()
 
     updates, params = [], []
     if req.permission is not None:
         if req.permission not in ("edit", "read_only"):
             raise HTTPException(status_code=400, detail="Permission must be 'edit' or 'read_only'")
-        updates.append("permission = %s")
-        params.append(req.permission)
+        updates.append("permission = %s"); params.append(req.permission)
     if req.designation is not None:
         if not req.designation.strip():
             raise HTTPException(status_code=400, detail="Designation cannot be empty")
-        updates.append("designation = %s")
-        params.append(req.designation.strip())
+        updates.append("designation = %s"); params.append(req.designation.strip())
     if req.modules is not None:
         _validate_modules(req.modules)
-        updates.append("module_access = %s")
-        params.append(json.dumps(req.modules))
-
+        updates.append("module_access = %s"); params.append(json.dumps(req.modules))
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
-
     conn = get_conn()
     conn.cursor().execute(f"UPDATE staff_users SET {', '.join(updates)} WHERE id = %s", (*params, user_id))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     audit_write(institute, None, "UPDATE_USER", dict(before_user) if before_user else None, {"permission": req.permission, "designation": req.designation, "modules": req.modules})
     return {"id": user_id, "status": "updated"}
 
@@ -724,15 +724,12 @@ def update_staff_permission(user_id: int, req: StaffPermissionUpdate, institute:
 @app.delete("/api/users/{user_id}")
 def remove_staff_user(user_id: int, institute: CurrentInstitute = Depends(require_owner)):
     verify_staff_ownership(user_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
-    # FIX: same plural/singular mismatch as list_staff_users.
+    conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT id, full_name, email, permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
     before_user = cursor.fetchone()
     cursor.execute("DELETE FROM staff_users WHERE id = %s", (user_id,))
     cursor.execute("DELETE FROM sessions WHERE staff_user_id = %s", (user_id,))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     audit_write(institute, None, "DELETE_USER", dict(before_user) if before_user else None, None)
     return {"status": "removed"}
 
@@ -747,8 +744,7 @@ class BranchCreate(BaseModel):
 
 @app.get("/api/branches")
 def get_branches(institute: CurrentInstitute = Depends(get_current_institute)):
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT * FROM branches WHERE tenant_id = %s ORDER BY id", (institute.id,))
     branches = [dict(row) for row in cursor.fetchall()]
     conn.close()
@@ -757,8 +753,7 @@ def get_branches(institute: CurrentInstitute = Depends(get_current_institute)):
 
 @app.post("/api/branches")
 def add_branch(branch: BranchCreate, institute: CurrentInstitute = Depends(require_write_access)):
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     try:
         cursor.execute(
             "INSERT INTO branches (institute_id, tenant_id, name) VALUES (%s, %s, %s) RETURNING id",
@@ -774,37 +769,51 @@ def add_branch(branch: BranchCreate, institute: CurrentInstitute = Depends(requi
     return {"id": branch_id, "name": branch.name}
 
 
-# ---------------------------------------------------------------------------
-# Generic records (students / teachers / classrooms / syllabus / attendance / invigilation / fees)
-# ---------------------------------------------------------------------------
-
 @app.patch("/api/branches/{branch_id}")
 def edit_branch(branch_id: int, branch: BranchCreate, institute: CurrentInstitute = Depends(require_write_access)):
     verify_branch_ownership(branch_id, institute.id)
-    name=branch.name.strip()
-    if not name: raise HTTPException(status_code=400, detail="Branch name cannot be empty")
-    conn=get_conn()
+    name = branch.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Branch name cannot be empty")
+    conn = get_conn()
     try:
-        cur=conn.cursor(); cur.execute("SELECT id,name FROM branches WHERE id=%s AND tenant_id=%s",(branch_id,institute.id))
-        if not cur.fetchone(): raise HTTPException(status_code=404, detail="Branch not found")
-        cur.execute("UPDATE branches SET name=%s WHERE id=%s AND tenant_id=%s RETURNING id,name",(name,branch_id,institute.id)); row=cur.fetchone(); conn.commit(); return {"id":row[0],"name":row[1]}
+        cur = conn.cursor()
+        cur.execute("SELECT id,name FROM branches WHERE id=%s AND tenant_id=%s", (branch_id, institute.id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Branch not found")
+        cur.execute("UPDATE branches SET name=%s WHERE id=%s AND tenant_id=%s RETURNING id,name", (name, branch_id, institute.id))
+        row = cur.fetchone(); conn.commit(); return {"id": row[0], "name": row[1]}
     except psycopg2.IntegrityError:
         conn.rollback(); raise HTTPException(status_code=400, detail="A branch with that name already exists")
-    finally: conn.close()
+    finally:
+        conn.close()
+
 
 @app.delete("/api/branches/{branch_id}")
 def delete_branch(branch_id: int, institute: CurrentInstitute = Depends(require_write_access)):
     verify_branch_ownership(branch_id, institute.id)
-    conn=get_conn()
+    conn = get_conn()
     try:
-        cur=conn.cursor(); cur.execute("SELECT id,name FROM branches WHERE id=%s AND tenant_id=%s",(branch_id,institute.id)); row=cur.fetchone()
-        if not row: raise HTTPException(status_code=404, detail="Branch not found")
-        name=row["name"]; cur.execute("DELETE FROM branches WHERE id=%s AND tenant_id=%s",(branch_id,institute.id))
-        if cur.rowcount!=1: raise HTTPException(status_code=404, detail="Branch not found")
-        conn.commit(); return {"status":"deleted","id":branch_id,"name":name,"data_wiped":True}
+        cur = conn.cursor()
+        cur.execute("SELECT id,name FROM branches WHERE id=%s AND tenant_id=%s", (branch_id, institute.id))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Branch not found")
+        name = row["name"]
+        cur.execute("DELETE FROM branches WHERE id=%s AND tenant_id=%s", (branch_id, institute.id))
+        if cur.rowcount != 1:
+            raise HTTPException(status_code=404, detail="Branch not found")
+        conn.commit()
+        return {"status": "deleted", "id": branch_id, "name": name, "data_wiped": True}
     except Exception:
         conn.rollback(); raise
-    finally: conn.close()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Generic records
+# ---------------------------------------------------------------------------
 
 @app.get("/api/records/{module}/{branch_id}")
 def get_records(module: str, branch_id: int, search: str = "", sort: str = "id", direction: str = "desc", page: int = 1, page_size: int = 200, institute: CurrentInstitute = Depends(get_current_institute)):
@@ -832,36 +841,26 @@ def get_records(module: str, branch_id: int, search: str = "", sort: str = "id",
 
 
 def _sniff_mime(contents: bytes, ext: str) -> str:
-    if contents[:4] == b"%PDF":
-        return "application/pdf"
-    if contents[:3] == b"\xff\xd8\xff":
-        return "image/jpeg"
-    if contents[:8] == b"\x89PNG\r\n\x1a\n":
-        return "image/png"
-    if contents[:4] == b"PK\x03\x04":
-        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    if contents[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        return "application/msword"
+    if contents[:4] == b"%PDF": return "application/pdf"
+    if contents[:3] == b"\xff\xd8\xff": return "image/jpeg"
+    if contents[:8] == b"\x89PNG\r\n\x1a\n": return "image/png"
+    if contents[:4] == b"PK\x03\x04": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    if contents[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1": return "application/msword"
     return "application/octet-stream"
 
 
 def save_upload(file: UploadFile) -> str:
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}",
-        )
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}")
     contents = file.file.read()
     if len(contents) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail="File too large (max 5 MB)")
     if not contents:
         raise HTTPException(status_code=400, detail="File is empty")
-
     sniffed = _sniff_mime(contents, ext)
     if sniffed not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(status_code=400, detail="File content does not match an allowed file type")
-
     filename = f"{secrets.token_hex(16)}{ext}"
     dest = os.path.join(UPLOAD_DIR, filename)
     if os.path.commonpath([UPLOAD_DIR, os.path.abspath(dest)]) != UPLOAD_DIR:
@@ -882,7 +881,6 @@ def get_uploaded_file(filename: str, institute: CurrentInstitute = Depends(get_c
     path = os.path.join(UPLOAD_DIR, safe_name)
     if os.path.commonpath([UPLOAD_DIR, os.path.abspath(path)]) != UPLOAD_DIR or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="File not found")
-
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -915,9 +913,6 @@ RECORD_FIELDS = {
 RECORD_HAS_DOCUMENT = {"classrooms", "attendance", "invigilation", "fees"}
 
 
-# ================================
-# INSTITUTE-WIDE SEARCH ENDPOINT
-# ================================
 @app.get("/api/search/{branch_id}")
 def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = Depends(get_current_institute)):
     verify_branch_read_access(branch_id, institute.id)
@@ -925,13 +920,9 @@ def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = 
     if not term:
         return {"results": []}
     labels = {
-        "students": "Student Department",
-        "teachers": "Teacher Department",
-        "classrooms": "Classroom Department",
-        "syllabus": "Syllabus",
-        "attendance": "Attendance",
-        "fees": "Fees",
-        "invigilation": "Invigilation"
+        "students": "Student Department", "teachers": "Teacher Department",
+        "classrooms": "Classroom Department", "syllabus": "Syllabus",
+        "attendance": "Attendance", "fees": "Fees", "invigilation": "Invigilation"
     }
     results = []
     conn = get_conn()
@@ -954,22 +945,16 @@ def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = 
                     value = item.get(key)
                     if value not in (None, "") and str(value) != str(primary):
                         parts.append(f"{key.replace('_', ' ')}: {value}")
-                    if len(parts) >= 4:
-                        break
-                results.append({
-                    "module": module,
-                    "label": labels[module],
-                    "primary": str(primary),
-                    "details": " · ".join(parts)
-                })
+                    if len(parts) >= 4: break
+                results.append({"module": module, "label": labels[module], "primary": str(primary), "details": " · ".join(parts)})
         return {"results": results[:24]}
     finally:
         conn.close()
 
 
-# ================================
-# WHATSAPP MESSAGING ENDPOINTS
-# ================================
+# ---------------------------------------------------------------------------
+# WhatsApp
+# ---------------------------------------------------------------------------
 
 def send_whatsapp(to_number: str, message: str) -> bool:
     if not all([WHATSAPP_API_URL, WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
@@ -977,12 +962,7 @@ def send_whatsapp(to_number: str, message: str) -> bool:
     import requests
     url = f"{WHATSAPP_API_URL.rstrip('/')}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_API_TOKEN}", "Content-Type": "application/json"}
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": to_number,
-        "type": "text",
-        "text": {"body": message}
-    }
+    payload = {"messaging_product": "whatsapp", "to": to_number, "type": "text", "text": {"body": message}}
     try:
         resp = requests.post(url, json=payload, headers=headers, timeout=10)
         return resp.status_code == 201
@@ -1017,26 +997,13 @@ def send_absence_notification(req: dict, institute: CurrentInstitute = Depends(r
 
 @app.post("/api/whatsapp/send-fee-reminders")
 def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_access)):
-    """Send WhatsApp reminders to parents whose fee due date is within 7 days.
-
-    FIX: the fees table does not have a student_id column - it stores the
-    student_name as free text. Join back to students on (name, branch_id)
-    instead. Also made the status check case-insensitive and constrained
-    due_date to a strict ISO shape before casting, so a stray non-date
-    string can never blow up the query.
-    """
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT f.student_name,
-                   s.parent_contact,
-                   f.due_date,
-                   f.amount_inr
+            SELECT f.student_name, s.parent_contact, f.due_date, f.amount_inr
             FROM fees f
-            LEFT JOIN students s
-              ON s.name = f.student_name
-             AND s.branch_id = f.branch_id
+            LEFT JOIN students s ON s.name = f.student_name AND s.branch_id = f.branch_id
             WHERE f.branch_id IN (SELECT id FROM branches WHERE tenant_id=%s)
               AND LOWER(COALESCE(f.status,'')) != 'paid'
               AND f.due_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
@@ -1046,12 +1013,9 @@ def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_acces
         rows = cur.fetchall()
         sent_count = 0
         for row in rows:
-            name = row["student_name"]
-            contact = row["parent_contact"]
-            due = row["due_date"]
-            amount = row["amount_inr"]
-            if not contact:
-                continue
+            name = row["student_name"]; contact = row["parent_contact"]
+            due = row["due_date"]; amount = row["amount_inr"]
+            if not contact: continue
             if not contact.startswith('+'):
                 contact = '+91' + contact
             msg = f"Fee Reminder: Your ward {name} has a pending fee of ₹{amount} due on {due}. Please clear the dues at the earliest."
@@ -1063,8 +1027,46 @@ def send_fee_reminders(institute: CurrentInstitute = Depends(require_write_acces
         conn.close()
 
 
+class BroadcastNoticeboardRequest(BaseModel):
+    branch_id: int | None = None
+    message: str
+    batch: str | None = None
+
+
+@app.post("/api/whatsapp/broadcast")
+def broadcast_notice(req: BroadcastNoticeboardRequest, institute: CurrentInstitute = Depends(require_write_access)):
+    msg = (req.message or "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="Message body cannot be empty.")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        if req.batch:
+            cur.execute(
+                "SELECT name, parent_contact FROM students WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) AND batch=%s AND parent_contact IS NOT NULL",
+                (institute.id, req.batch),
+            )
+        else:
+            cur.execute(
+                "SELECT name, parent_contact FROM students WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) AND parent_contact IS NOT NULL",
+                (institute.id,),
+            )
+        sent = 0
+        for row in cur.fetchall():
+            contact = row["parent_contact"]
+            if not contact: continue
+            if not contact.startswith('+'):
+                contact = '+91' + contact
+            if send_whatsapp(contact, f"[IBEX Notice] {msg}"):
+                sent += 1
+        audit_write(institute, req.branch_id, "WHATSAPP_BROADCAST", None, {"sent": sent, "batch": req.batch, "message": msg[:200]})
+        return {"sent": sent}
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
-# Attendance (batchwise present/absent marking, sourced from Student Department)
+# Attendance
 # ---------------------------------------------------------------------------
 
 class AttendanceMarkRequest(BaseModel):
@@ -1080,19 +1082,10 @@ def mark_attendance(req: AttendanceMarkRequest, institute: CurrentInstitute = De
     verify_branch_ownership(req.branch_id, institute.id)
     if req.status not in ("Present", "Absent"):
         raise HTTPException(status_code=400, detail="Status must be 'Present' or 'Absent'")
-
-    conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute(
-        "DELETE FROM attendance WHERE branch_id = %s AND student_name = %s AND date = %s",
-        (req.branch_id, req.student_name, req.date),
-    )
-    cursor.execute(
-        "INSERT INTO attendance (branch_id, student_name, date, status) VALUES (%s, %s, %s, %s)",
-        (req.branch_id, req.student_name, req.date, req.status),
-    )
-    conn.commit()
-    conn.close()
+    conn = get_conn(); cursor = conn.cursor()
+    cursor.execute("DELETE FROM attendance WHERE branch_id = %s AND student_name = %s AND date = %s", (req.branch_id, req.student_name, req.date))
+    cursor.execute("INSERT INTO attendance (branch_id, student_name, date, status) VALUES (%s, %s, %s, %s)", (req.branch_id, req.student_name, req.date, req.status))
+    conn.commit(); conn.close()
     audit_write(institute, req.branch_id, "MARK_ATTENDANCE", None, {"student_name": req.student_name, "date": req.date, "status": req.status})
     return {"status": "success"}
 
@@ -1101,36 +1094,22 @@ def mark_attendance(req: AttendanceMarkRequest, institute: CurrentInstitute = De
 def get_attendance_history(branch_id: int, student_name: str, institute: CurrentInstitute = Depends(get_current_institute)):
     check_module_access(institute, "attendance")
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     if branch_id == 0:
-        cursor.execute(
-            "SELECT date, status FROM attendance WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND student_name = %s ORDER BY date DESC",
-            (institute.id, student_name),
-        )
+        cursor.execute("SELECT date, status FROM attendance WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND student_name = %s ORDER BY date DESC", (institute.id, student_name))
     else:
-        cursor.execute(
-            "SELECT date, status FROM attendance WHERE branch_id = %s AND student_name = %s ORDER BY date DESC",
-            (branch_id, student_name),
-        )
+        cursor.execute("SELECT date, status FROM attendance WHERE branch_id = %s AND student_name = %s ORDER BY date DESC", (branch_id, student_name))
     history = [dict(row) for row in cursor.fetchall()]
     conn.close()
     present = sum(1 for h in history if h["status"] == "Present")
-    return {
-        "student_name": student_name,
-        "history": history,
-        "total_marked": len(history),
-        "present_count": present,
-        "absent_count": len(history) - present,
-    }
+    return {"student_name": student_name, "history": history, "total_marked": len(history), "present_count": present, "absent_count": len(history) - present}
 
 
 @app.get("/api/attendance/{branch_id}/{date}")
 def get_attendance_for_date(branch_id: int, date: str, institute: CurrentInstitute = Depends(get_current_institute)):
     check_module_access(institute, "attendance")
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     if branch_id == 0:
         cursor.execute("SELECT student_name, status FROM attendance WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND date = %s", (institute.id, date))
     else:
@@ -1141,15 +1120,14 @@ def get_attendance_for_date(branch_id: int, date: str, institute: CurrentInstitu
 
 
 # ---------------------------------------------------------------------------
-# Timetable generation
+# Timetable
 # ---------------------------------------------------------------------------
 
 @app.get("/api/timetable/slots/{branch_id}")
 def get_timetable_slots(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
     check_module_access(institute, "timetables")
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     if branch_id == 0:
         cursor.execute("SELECT * FROM timetables_slots WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) ORDER BY branch_id, batch_name, lecture_number", (institute.id,))
     else:
@@ -1163,27 +1141,18 @@ def get_timetable_slots(branch_id: int, institute: CurrentInstitute = Depends(ge
 def list_timetable_configs(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
     check_module_access(institute, "timetables")
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     if branch_id == 0:
         cursor.execute("SELECT branch_id, batch_name, timings_json, teachers_config_json FROM timetable_configs WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) ORDER BY branch_id, batch_name", (institute.id,))
     else:
         cursor.execute("SELECT branch_id, batch_name, timings_json, teachers_config_json FROM timetable_configs WHERE branch_id = %s ORDER BY batch_name", (branch_id,))
     configs = []
     for row in cursor.fetchall():
-        try:
-            timings = json.loads(row["timings_json"] or "[]")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            timings = []
-        try:
-            teachers_config = json.loads(row["teachers_config_json"] or "[]")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            teachers_config = []
-        configs.append({
-            "batch_name": row["batch_name"],
-            "timings": timings if isinstance(timings, list) else [],
-            "teachers_config": teachers_config if isinstance(teachers_config, list) else [],
-        })
+        try: timings = json.loads(row["timings_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError): timings = []
+        try: teachers_config = json.loads(row["teachers_config_json"] or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError): teachers_config = []
+        configs.append({"batch_name": row["batch_name"], "timings": timings if isinstance(timings, list) else [], "teachers_config": teachers_config if isinstance(teachers_config, list) else []})
     conn.close()
     return configs
 
@@ -1215,15 +1184,8 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
     verify_branch_ownership(req.branch_id, institute.id)
     if not req.timings:
         raise HTTPException(status_code=400, detail="Add at least one lecture timing")
-
-    conn = get_conn()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        "DELETE FROM timetables_slots WHERE branch_id = %s AND batch_name = %s",
-        (req.branch_id, req.batch_name),
-    )
-
+    conn = get_conn(); cursor = conn.cursor()
+    cursor.execute("DELETE FROM timetables_slots WHERE branch_id = %s AND batch_name = %s", (req.branch_id, req.batch_name))
     cursor.execute("SELECT room_no, capacity FROM classrooms WHERE branch_id = %s AND COALESCE(capacity, 0) > 0 ORDER BY capacity, id", (req.branch_id,))
     available_rooms = [(row[0], int(row[1])) for row in cursor.fetchall() if row[0]]
     cursor.execute("SELECT COUNT(*) FROM students WHERE branch_id = %s AND batch = %s", (req.branch_id, req.batch_name))
@@ -1231,21 +1193,16 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
     if batch_size and not any(capacity >= batch_size for _, capacity in available_rooms):
         conn.close()
         raise HTTPException(status_code=400, detail=f"Batch has {batch_size} students, but no registered classroom has enough capacity.")
-
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     day_index = {day: i for i, day in enumerate(days)}
     timings_sorted = sorted(req.timings, key=lambda t: t.lecture_number)
     generated_slots = []
     warnings = []
-
     batch_load = {day: 0 for day in days}
 
     def slot_is_free(day, timing, teacher_name):
         slot_time = timing.time_slot
-        cursor.execute(
-            "SELECT time_slot, teacher FROM timetables_slots WHERE branch_id = %s AND day = %s AND (batch_name = %s OR teacher = %s)",
-            (req.branch_id, day, req.batch_name, teacher_name),
-        )
+        cursor.execute("SELECT time_slot, teacher FROM timetables_slots WHERE branch_id = %s AND day = %s AND (batch_name = %s OR teacher = %s)", (req.branch_id, day, req.batch_name, teacher_name))
         for existing in cursor.fetchall():
             if _time_ranges_overlap(slot_time, existing[0]):
                 return False
@@ -1253,8 +1210,7 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
 
     def free_room(day, slot_time):
         for candidate_room, capacity in available_rooms:
-            if batch_size and capacity < batch_size:
-                continue
+            if batch_size and capacity < batch_size: continue
             cursor.execute("SELECT time_slot FROM timetables_slots WHERE branch_id = %s AND day = %s AND room = %s", (req.branch_id, day, candidate_room))
             if all(not _time_ranges_overlap(slot_time, row[0]) for row in cursor.fetchall()):
                 return candidate_room
@@ -1265,97 +1221,48 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         subject = str(t_config.get('subject', '')).strip()
         target_lectures = max(0, int(t_config.get('lectures_per_week', 0)))
         unavailable = {str(d).strip() for d in t_config.get('unavailable_days', [])}
-
-        if not teacher_name or target_lectures == 0:
-            continue
-
-        assigned_count = 0
-        used_days = []
+        if not teacher_name or target_lectures == 0: continue
+        assigned_count = 0; used_days = []
         eligible_days = [d for d in days if d not in unavailable]
-
         if target_lectures <= 1:
             preferred_day_indices = [0] if eligible_days else []
         elif target_lectures <= len(eligible_days):
-            preferred_day_indices = [
-                round(i * (len(eligible_days) - 1) / (target_lectures - 1))
-                for i in range(target_lectures)
-            ]
+            preferred_day_indices = [round(i * (len(eligible_days) - 1) / (target_lectures - 1)) for i in range(target_lectures)]
         else:
             preferred_day_indices = [i % len(eligible_days) for i in range(target_lectures)] if eligible_days else []
-
         for lecture_index in range(target_lectures):
             candidates = []
             desired_idx = preferred_day_indices[lecture_index] if preferred_day_indices else 0
             desired_day = eligible_days[desired_idx] if eligible_days else None
             for day in days:
-                if day in unavailable:
-                    continue
+                if day in unavailable: continue
                 for timing in timings_sorted:
-                    if not slot_is_free(day, timing, teacher_name):
-                        continue
+                    if not slot_is_free(day, timing, teacher_name): continue
                     room = free_room(day, timing.time_slot)
                     idx = day_index[day]
                     min_distance = min((abs(idx - used) for used in used_days), default=5)
                     same_day_penalty = 1000 if idx in used_days and len(set(used_days)) < len(eligible_days) else 0
                     preferred_distance = abs(idx - day_index[desired_day]) if desired_day else 0
-                    score = (
-                        preferred_distance * 100
-                        + same_day_penalty
-                        + batch_load[day] * 25
-                        - min_distance * 2
-                        + idx * 0.01
-                        + timing.lecture_number * 0.001
-                    )
+                    score = (preferred_distance * 100 + same_day_penalty + batch_load[day] * 25 - min_distance * 2 + idx * 0.01 + timing.lecture_number * 0.001)
                     candidates.append((score, day, timing, room))
-
-            if not candidates:
-                break
-
+            if not candidates: break
             _, day, timing, room = min(candidates, key=lambda x: x[0])
-            cursor.execute(
-                """INSERT INTO timetables_slots
-                   (branch_id, batch_name, day, time_slot, lecture_number, subject, teacher, room)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (req.branch_id, req.batch_name, day, timing.time_slot,
-                 timing.lecture_number, subject, teacher_name, room),
-            )
-            generated_slots.append({
-                "day": day, "time_slot": timing.time_slot,
-                "lecture_number": timing.lecture_number,
-                "subject": subject, "teacher": teacher_name, "room": room,
-            })
-            assigned_count += 1
-            batch_load[day] += 1
-            used_days.append(day_index[day])
-
+            cursor.execute("""INSERT INTO timetables_slots (branch_id, batch_name, day, time_slot, lecture_number, subject, teacher, room) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                           (req.branch_id, req.batch_name, day, timing.time_slot, timing.lecture_number, subject, teacher_name, room))
+            generated_slots.append({"day": day, "time_slot": timing.time_slot, "lecture_number": timing.lecture_number, "subject": subject, "teacher": teacher_name, "room": room})
+            assigned_count += 1; batch_load[day] += 1; used_days.append(day_index[day])
         if assigned_count < target_lectures:
-            warnings.append(
-                f"{teacher_name}: only scheduled {assigned_count}/{target_lectures} lectures "
-                f"(not enough free day/time slots without a conflict)."
-            )
-
-    cursor.execute(
-        "SELECT id FROM timetable_configs WHERE branch_id = %s AND batch_name = %s",
-        (req.branch_id, req.batch_name),
-    )
+            warnings.append(f"{teacher_name}: only scheduled {assigned_count}/{target_lectures} lectures (not enough free day/time slots without a conflict).")
+    cursor.execute("SELECT id FROM timetable_configs WHERE branch_id = %s AND batch_name = %s", (req.branch_id, req.batch_name))
     existing_config = cursor.fetchone()
     timings_json = json.dumps([t.dict() for t in req.timings])
     teachers_config_json = json.dumps(req.teachers_config)
     now_iso = datetime.utcnow().isoformat()
     if existing_config:
-        cursor.execute(
-            "UPDATE timetable_configs SET timings_json = %s, teachers_config_json = %s, updated_at = %s WHERE id = %s",
-            (timings_json, teachers_config_json, now_iso, existing_config[0]),
-        )
+        cursor.execute("UPDATE timetable_configs SET timings_json = %s, teachers_config_json = %s, updated_at = %s WHERE id = %s", (timings_json, teachers_config_json, now_iso, existing_config[0]))
     else:
-        cursor.execute(
-            """INSERT INTO timetable_configs (branch_id, batch_name, timings_json, teachers_config_json, updated_at)
-               VALUES (%s, %s, %s, %s, %s)""",
-            (req.branch_id, req.batch_name, timings_json, teachers_config_json, now_iso),
-        )
-
-    conn.commit()
-    conn.close()
+        cursor.execute("INSERT INTO timetable_configs (branch_id, batch_name, timings_json, teachers_config_json, updated_at) VALUES (%s, %s, %s, %s, %s)", (req.branch_id, req.batch_name, timings_json, teachers_config_json, now_iso))
+    conn.commit(); conn.close()
     audit_write(institute, req.branch_id, "GENERATE_TIMETABLE", None, {"batch_name": req.batch_name, "slots": generated_slots, "warnings": warnings})
     return {"status": "success", "slots": generated_slots, "warnings": warnings}
 
@@ -1364,14 +1271,10 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
 def delete_all_timetables(branch_id: int, institute: CurrentInstitute = Depends(require_write_access)):
     check_module_access(institute, "timetables")
     verify_branch_ownership(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM timetables_slots WHERE branch_id = %s", (branch_id,))
-    slots_deleted = cursor.rowcount
-    cursor.execute("DELETE FROM timetable_configs WHERE branch_id = %s", (branch_id,))
-    configs_deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
+    conn = get_conn(); cursor = conn.cursor()
+    cursor.execute("DELETE FROM timetables_slots WHERE branch_id = %s", (branch_id,)); slots_deleted = cursor.rowcount
+    cursor.execute("DELETE FROM timetable_configs WHERE branch_id = %s", (branch_id,)); configs_deleted = cursor.rowcount
+    conn.commit(); conn.close()
     audit_write(institute, branch_id, "DELETE_TIMETABLES", {"slots_deleted": slots_deleted, "configs_deleted": configs_deleted}, None)
     return {"status": "cleared", "slots_deleted": slots_deleted, "configs_deleted": configs_deleted}
 
@@ -1387,28 +1290,15 @@ class TimetableSlotEdit(BaseModel):
 @app.patch("/api/timetable/slots/{slot_id}")
 def edit_timetable_slot(slot_id: int, req: TimetableSlotEdit, institute: CurrentInstitute = Depends(require_write_access)):
     check_module_access(institute, "timetables")
-    conn = get_conn()
-    cursor = conn.cursor()
-    cursor.execute(
-        """SELECT timetables_slots.* FROM timetables_slots
-           JOIN branches ON branches.id = timetables_slots.branch_id
-           WHERE timetables_slots.id = %s AND branches.tenant_id = %s""",
-        (slot_id, institute.id),
-    )
+    conn = get_conn(); cursor = conn.cursor()
+    cursor.execute("""SELECT timetables_slots.* FROM timetables_slots JOIN branches ON branches.id = timetables_slots.branch_id WHERE timetables_slots.id = %s AND branches.tenant_id = %s""", (slot_id, institute.id))
     existing = cursor.fetchone()
     if not existing:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Slot not found")
-    cursor.execute(
-        "SELECT COUNT(*) FROM timetables_slots WHERE branch_id = %s AND id <> %s AND day = %s AND time_slot = %s AND teacher = %s",
-        (existing["branch_id"], slot_id, req.day, req.time_slot, req.teacher),
-    )
+        conn.close(); raise HTTPException(status_code=404, detail="Slot not found")
+    cursor.execute("SELECT COUNT(*) FROM timetables_slots WHERE branch_id = %s AND id <> %s AND day = %s AND time_slot = %s AND teacher = %s", (existing["branch_id"], slot_id, req.day, req.time_slot, req.teacher))
     if cursor.fetchone()[0]:
         conn.close(); raise HTTPException(status_code=409, detail="Teacher already has another lecture in this time slot.")
-    cursor.execute(
-        "SELECT COUNT(*) FROM timetables_slots WHERE branch_id = %s AND id <> %s AND day = %s AND time_slot = %s AND room = %s",
-        (existing["branch_id"], slot_id, req.day, req.time_slot, req.room),
-    )
+    cursor.execute("SELECT COUNT(*) FROM timetables_slots WHERE branch_id = %s AND id <> %s AND day = %s AND time_slot = %s AND room = %s", (existing["branch_id"], slot_id, req.day, req.time_slot, req.room))
     if cursor.fetchone()[0]:
         conn.close(); raise HTTPException(status_code=409, detail="Room is already occupied in this time slot.")
     cursor.execute("SELECT capacity FROM classrooms WHERE branch_id = %s AND room_no = %s", (existing["branch_id"], req.room))
@@ -1419,12 +1309,8 @@ def edit_timetable_slot(slot_id: int, req: TimetableSlotEdit, institute: Current
     batch_size = cursor.fetchone()[0]
     if batch_size and int(room_capacity[0] or 0) < batch_size:
         conn.close(); raise HTTPException(status_code=400, detail="Selected room does not have enough capacity for this batch.")
-    cursor.execute(
-        "UPDATE timetables_slots SET day = %s, time_slot = %s, subject = %s, teacher = %s, room = %s WHERE id = %s",
-        (req.day, req.time_slot, req.subject, req.teacher, req.room, slot_id),
-    )
-    conn.commit()
-    conn.close()
+    cursor.execute("UPDATE timetables_slots SET day = %s, time_slot = %s, subject = %s, teacher = %s, room = %s WHERE id = %s", (req.day, req.time_slot, req.subject, req.teacher, req.room, slot_id))
+    conn.commit(); conn.close()
     audit_write(institute, existing["branch_id"], "UPDATE_TIMETABLE_SLOT", dict(existing), {"day": req.day, "time_slot": req.time_slot, "subject": req.subject, "teacher": req.teacher, "room": req.room})
     return {"status": "updated"}
 
@@ -1442,34 +1328,33 @@ class SeatingGenerateRequest(BaseModel):
 
 
 def _build_seating_layout(students, rows, columns):
-    capacity=rows*columns; selected=list(students[:capacity])
+    capacity = rows * columns; selected = list(students[:capacity])
     if not selected: return []
-    buckets=defaultdict(list)
+    buckets = defaultdict(list)
     for st in selected: buckets[str(st.get("batch") or "").strip()].append(st)
     for v in buckets.values(): random.shuffle(v)
-    if max(map(len,buckets.values()))>(capacity+1)//2:
-        raise HTTPException(status_code=400,detail="The seating constraints cannot be satisfied: one batch has too many students for this grid.")
-    grid=[[None]*columns for _ in range(rows)]; pos=[(r,c) for r in range(rows) for c in range(columns)]
-    def ok(st,r,c):
-        batch=str(st.get("batch") or "").strip()
-        left=c and grid[r][c-1] is not None and str(grid[r][c-1].get("batch") or "").strip()==batch
-        front=r and grid[r-1][c] is not None and str(grid[r-1][c].get("batch") or "").strip()==batch
+    if max(map(len, buckets.values())) > (capacity + 1) // 2:
+        raise HTTPException(status_code=400, detail="The seating constraints cannot be satisfied: one batch has too many students for this grid.")
+    grid = [[None]*columns for _ in range(rows)]; pos = [(r, c) for r in range(rows) for c in range(columns)]
+    def ok(st, r, c):
+        batch = str(st.get("batch") or "").strip()
+        left = c and grid[r][c-1] is not None and str(grid[r][c-1].get("batch") or "").strip() == batch
+        front = r and grid[r-1][c] is not None and str(grid[r-1][c].get("batch") or "").strip() == batch
         return not (left or front)
     def solve(i=0):
-        if i==len(pos): return True
-        r,c=pos[i]; choices=[v for v in buckets.values() if v]; random.shuffle(choices); choices.sort(key=len,reverse=True)
+        if i == len(pos): return True
+        r, c = pos[i]; choices = [v for v in buckets.values() if v]; random.shuffle(choices); choices.sort(key=len, reverse=True)
         for v in choices:
-            st=v.pop()
-            if ok(st,r,c):
-                grid[r][c]=st
+            st = v.pop()
+            if ok(st, r, c):
+                grid[r][c] = st
                 if solve(i+1): return True
-                grid[r][c]=None
+                grid[r][c] = None
             v.append(st)
         return False
     if not solve():
-        raise HTTPException(status_code=400,detail="The seating constraints cannot be satisfied with the selected students and grid size. Increase the grid size or use more than one batch.")
-    return [{"row":r+1,"column":c+1,"student_id":grid[r][c]["id"],"name":grid[r][c]["name"],"batch":grid[r][c]["batch"],"roll_number":grid[r][c]["roll_number"]} for r in range(rows) for c in range(columns) if grid[r][c] is not None]
-
+        raise HTTPException(status_code=400, detail="The seating constraints cannot be satisfied with the selected students and grid size. Increase the grid size or use more than one batch.")
+    return [{"row": r+1, "column": c+1, "student_id": grid[r][c]["id"], "name": grid[r][c]["name"], "batch": grid[r][c]["batch"], "roll_number": grid[r][c]["roll_number"]} for r in range(rows) for c in range(columns) if grid[r][c] is not None]
 
 
 @app.get("/api/seating/{branch_id}")
@@ -1481,8 +1366,7 @@ def get_seating_layouts(branch_id: int, institute: CurrentInstitute = Depends(ge
         cur.execute("SELECT id, branch_id, exam_date, room_number, rows, columns, assignments_json, created_at FROM exam_seatings WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) ORDER BY exam_date DESC, id DESC", (institute.id,))
     else:
         cur.execute("SELECT id, branch_id, exam_date, room_number, rows, columns, assignments_json, created_at FROM exam_seatings WHERE branch_id = %s ORDER BY exam_date DESC, id DESC", (branch_id,))
-    rows = cur.fetchall()
-    conn.close()
+    rows = cur.fetchall(); conn.close()
     return [{**dict(r), "assignments": json.loads(r["assignments_json"])} for r in rows]
 
 
@@ -1504,95 +1388,40 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
     room_number = req.room_number.strip()
     if not room_number:
         raise HTTPException(status_code=400, detail="Room number is required.")
-
     conn = get_conn()
-
     room_cur = conn.cursor()
-    room_cur.execute(
-        """SELECT c.room_no, c.capacity
-           FROM classrooms c
-           JOIN branches b ON b.id = c.branch_id
-           WHERE b.tenant_id = %s AND c.room_no = %s
-           LIMIT 1""",
-        (institute.id, room_number),
-    )
+    room_cur.execute("""SELECT c.room_no, c.capacity FROM classrooms c JOIN branches b ON b.id = c.branch_id WHERE b.tenant_id = %s AND c.room_no = %s LIMIT 1""", (institute.id, room_number))
     room = room_cur.fetchone()
     if not room:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Selected exam room is not registered for this institute.")
-
+        conn.close(); raise HTTPException(status_code=400, detail="Selected exam room is not registered for this institute.")
     requested_capacity = req.rows * req.columns
     room_capacity = int(room[1] or 0)
     if room_capacity <= 0:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Selected room has no valid seating capacity.")
+        conn.close(); raise HTTPException(status_code=400, detail="Selected room has no valid seating capacity.")
     if requested_capacity > room_capacity:
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Grid capacity ({requested_capacity}) exceeds room capacity ({room_capacity}).")
-
+        conn.close(); raise HTTPException(status_code=400, detail=f"Grid capacity ({requested_capacity}) exceeds room capacity ({room_capacity}).")
     cursor = conn.cursor()
-    cursor.execute(
-        "SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s",
-        (req.branch_id, req.exam_date, room_number),
-    )
-    old_room = cursor.fetchone()
-    old_student_ids = set()
+    cursor.execute("SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s", (req.branch_id, req.exam_date, room_number))
+    old_room = cursor.fetchone(); old_student_ids = set()
     if old_room:
-        try:
-            old_student_ids = {
-                int(a["student_id"])
-                for a in json.loads(old_room["assignments_json"] or "[]")
-                if a.get("student_id") is not None
-            }
-        except (TypeError, ValueError, KeyError):
-            pass
-    cursor.execute(
-        "DELETE FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s",
-        (req.branch_id, req.exam_date, room_number),
-    )
-
-    cursor.execute(
-        """SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number
-           FROM students WHERE branch_id = %s""",
-        (req.branch_id,),
-    )
+        try: old_student_ids = {int(a["student_id"]) for a in json.loads(old_room["assignments_json"] or "[]") if a.get("student_id") is not None}
+        except (TypeError, ValueError, KeyError): pass
+    cursor.execute("DELETE FROM exam_seatings WHERE branch_id = %s AND exam_date = %s AND room_number = %s", (req.branch_id, req.exam_date, room_number))
+    cursor.execute("SELECT id, name, COALESCE(batch, '') AS batch, COALESCE(roll_number, '') AS roll_number FROM students WHERE branch_id = %s", (req.branch_id,))
     student_rows = [dict(r) for r in cursor.fetchall()]
-
-    cursor.execute(
-        "SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s",
-        (req.branch_id, req.exam_date),
-    )
+    cursor.execute("SELECT assignments_json FROM exam_seatings WHERE branch_id = %s AND exam_date = %s", (req.branch_id, req.exam_date))
     assigned_elsewhere = set()
     for row in cursor.fetchall():
-        try:
-            assigned_elsewhere.update(
-                int(a["student_id"])
-                for a in json.loads(row["assignments_json"] or "[]")
-                if a.get("student_id") is not None
-            )
-        except (TypeError, ValueError, KeyError):
-            continue
+        try: assigned_elsewhere.update(int(a["student_id"]) for a in json.loads(row["assignments_json"] or "[]") if a.get("student_id") is not None)
+        except (TypeError, ValueError, KeyError): continue
     assigned_elsewhere.difference_update(old_student_ids)
-
-    remaining_students = [
-        student for student in student_rows
-        if int(student["id"]) not in assigned_elsewhere
-    ]
+    remaining_students = [s for s in student_rows if int(s["id"]) not in assigned_elsewhere]
     random.shuffle(remaining_students)
     if len(remaining_students) < requested_capacity:
-        conn.close()
-        raise HTTPException(
-            status_code=400,
-            detail=f"Only {len(remaining_students)} unassigned students remain for this exam; {requested_capacity} seats were requested.",
-        )
+        conn.close(); raise HTTPException(status_code=400, detail=f"Only {len(remaining_students)} unassigned students remain for this exam; {requested_capacity} seats were requested.")
     assignments = _build_seating_layout(remaining_students, req.rows, req.columns)
-
-    cursor.execute(
-        """INSERT INTO exam_seatings (branch_id, exam_date, room_number, rows, columns, assignments_json, created_at)
-           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (req.branch_id, req.exam_date, room_number, req.rows, req.columns,
-         json.dumps(assignments), datetime.utcnow().isoformat()),
-    )
+    cursor.execute("""INSERT INTO exam_seatings (branch_id, exam_date, room_number, rows, columns, assignments_json, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                   (req.branch_id, req.exam_date, room_number, req.rows, req.columns, json.dumps(assignments), datetime.utcnow().isoformat()))
     layout_id = cursor.fetchone()[0]
     conn.commit(); conn.close()
     audit_write(institute, req.branch_id, "GENERATE_SEATING", None, {"id": layout_id, "exam_date": req.exam_date, "room_number": room_number, "rows": req.rows, "columns": req.columns, "assignments": assignments})
@@ -1603,11 +1432,7 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
 def delete_seating_layout(layout_id: int, institute: CurrentInstitute = Depends(require_write_access)):
     check_module_access(institute, SEATING_MODULE)
     conn = get_conn(); cursor = conn.cursor()
-    cursor.execute(
-        """SELECT exam_seatings.* FROM exam_seatings JOIN branches ON branches.id = exam_seatings.branch_id
-           WHERE exam_seatings.id = %s AND branches.tenant_id = %s""",
-        (layout_id, institute.id),
-    )
+    cursor.execute("""SELECT exam_seatings.* FROM exam_seatings JOIN branches ON branches.id = exam_seatings.branch_id WHERE exam_seatings.id = %s AND branches.tenant_id = %s""", (layout_id, institute.id))
     before = cursor.fetchone()
     if not before:
         conn.close(); raise HTTPException(status_code=404, detail="Seating layout not found")
@@ -1615,8 +1440,6 @@ def delete_seating_layout(layout_id: int, institute: CurrentInstitute = Depends(
     conn.commit(); conn.close()
     audit_write(institute, before["branch_id"], "DELETE_SEATING", dict(before), None)
     return {"status": "deleted"}
-
-
 
 
 class FeeMarkPaidRequest(BaseModel):
@@ -1635,13 +1458,14 @@ def mark_fee_paid(fee_id: int, req: FeeMarkPaidRequest, institute: CurrentInstit
     if not before:
         conn.close(); raise HTTPException(status_code=404, detail="Fee record not found")
     cur.execute("UPDATE fees SET status='Paid', utr_reference=%s, paid_at=NOW(), paid_by=%s WHERE id=%s", (utr, institute.user_id, fee_id))
-    cur.execute("SELECT * FROM fees WHERE id = %s", (fee_id,)); after=cur.fetchone()
+    cur.execute("SELECT * FROM fees WHERE id = %s", (fee_id,)); after = cur.fetchone()
     conn.commit(); conn.close()
     audit_write(institute, before["branch_id"], "FEE_MARK_PAID", dict(before), dict(after))
-    return {"status":"paid","fee":dict(after)}
+    return {"status": "paid", "fee": dict(after)}
+
 
 # ---------------------------------------------------------------------------
-# Branch analytics
+# Analytics
 # ---------------------------------------------------------------------------
 
 IST_OFFSET = timedelta(hours=5, minutes=30)
@@ -1650,29 +1474,21 @@ IST_OFFSET = timedelta(hours=5, minutes=30)
 @app.get("/api/analytics/{branch_id}")
 def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cur = conn.cursor()
+    conn = get_conn(); cur = conn.cursor()
     scope = "branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)" if branch_id == 0 else "branch_id = %s"
     scope_param = institute.id if branch_id == 0 else branch_id
 
     def one(sql, params, default=0):
         try:
-            cur.execute(sql, params)
-            row = cur.fetchone()
-            return row[0] if row else default
+            cur.execute(sql, params); row = cur.fetchone(); return row[0] if row else default
         except Exception as exc:
-            conn.rollback()
-            print(f"[analytics] query failed: {exc}")
-            return default
+            conn.rollback(); print(f"[analytics] query failed: {exc}"); return default
 
     def all_rows(sql, params, default=None):
         try:
-            cur.execute(sql, params)
-            return cur.fetchall()
+            cur.execute(sql, params); return cur.fetchall()
         except Exception as exc:
-            conn.rollback()
-            print(f"[analytics] query failed: {exc}")
-            return [] if default is None else default
+            conn.rollback(); print(f"[analytics] query failed: {exc}"); return [] if default is None else default
 
     students_total = one(f"SELECT COUNT(*) FROM students WHERE {scope}", (scope_param,))
     teachers_total = one(f"SELECT COUNT(*) FROM teachers WHERE {scope}", (scope_param,))
@@ -1681,32 +1497,26 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
     try:
         cur.execute(f"SELECT COALESCE(SUM(amount_inr),0), COUNT(*) FROM fees WHERE {scope} AND LOWER(COALESCE(status,'')) = 'paid'", (scope_param,))
         paid_amount, paid_count = cur.fetchone() or (0, 0)
-    except Exception as exc:
-        conn.rollback(); print(f"[analytics] fees paid query failed: {exc}"); paid_amount, paid_count = 0, 0
+    except Exception:
+        conn.rollback(); paid_amount, paid_count = 0, 0
     try:
         cur.execute(f"SELECT COALESCE(SUM(amount_inr),0), COUNT(*) FROM fees WHERE {scope} AND LOWER(COALESCE(status,'')) != 'paid'", (scope_param,))
         pending_amount, pending_count = cur.fetchone() or (0, 0)
-    except Exception as exc:
-        conn.rollback(); print(f"[analytics] fees pending query failed: {exc}"); pending_amount, pending_count = 0, 0
+    except Exception:
+        conn.rollback(); pending_amount, pending_count = 0, 0
 
     now_ist = datetime.now(timezone.utc) + IST_OFFSET
-    today = now_ist.date()
-    week_start = today - timedelta(days=6)
+    today = now_ist.date(); week_start = today - timedelta(days=6)
     att_counts = {}
     rows = all_rows(f"SELECT status, COUNT(*) FROM attendance WHERE {scope} AND date >= %s AND date <= %s GROUP BY status", (scope_param, week_start.isoformat(), today.isoformat()))
-    for r in rows:
-        att_counts[str(r[0])] = int(r[1])
-    marked = sum(att_counts.values())
-    present = att_counts.get('Present', 0)
-    absent = att_counts.get('Absent', 0)
-
+    for r in rows: att_counts[str(r[0])] = int(r[1])
+    marked = sum(att_counts.values()); present = att_counts.get('Present', 0); absent = att_counts.get('Absent', 0)
     trend = []
     for i in range(7):
         d = week_start + timedelta(days=i)
         rows = all_rows(f"SELECT COUNT(*) FILTER (WHERE status='Present'), COUNT(*) FROM attendance WHERE {scope} AND date = %s", (scope_param, d.isoformat()))
         p, total = (rows[0] if rows else (0, 0))
         trend.append({"label": d.strftime('%a'), "pct": round(100 * p / total) if total else 0, "present": int(p or 0), "marked": int(total or 0)})
-
     by_batch = []
     rows = all_rows(f"""SELECT COALESCE(s.batch,'Unassigned') AS batch,
                               COUNT(*) FILTER (WHERE a.status='Present') AS present,
@@ -1718,11 +1528,9 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
                        GROUP BY COALESCE(s.batch,'Unassigned') ORDER BY batch""", (scope_param, week_start.isoformat()))
     for b, pv, tv in rows:
         by_batch.append({"batch": b, "present": int(pv or 0), "total": int(tv or 0), "pct": round(100 * pv / tv) if tv else 0})
-
     by_day = [{"day": r[0], "count": int(r[1])} for r in all_rows(f"SELECT day, COUNT(*) FROM timetables_slots WHERE {scope} GROUP BY day ORDER BY MIN(id)", (scope_param,))]
     scheduled = int(one(f"SELECT COUNT(*) FROM timetables_slots WHERE {scope}", (scope_param,)))
     logged = int(one(f"SELECT COUNT(*) FROM syllabus WHERE {scope} AND lecture_date >= %s", (scope_param, week_start.isoformat())))
-
     revenue_rows = all_rows(f"""
         SELECT COALESCE(TO_CHAR(paid_at, 'YYYY-MM-DD'),
                         CASE WHEN due_date ~ '^[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}$' THEN due_date END) AS day,
@@ -1746,15 +1554,334 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
     }
 
 
+@app.get("/api/analytics/slumps/{branch_id}")
+def detect_slumps(branch_id: int, days: int = 30, institute: CurrentInstitute = Depends(get_current_institute)):
+    verify_branch_read_access(branch_id, institute.id)
+    days = max(7, min(int(days), 180))
+    conn = get_conn(); cur = conn.cursor()
+    scope_att = "branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)" if branch_id == 0 else "branch_id = %s"
+    scope_param = institute.id if branch_id == 0 else branch_id
+    cutoff = (datetime.utcnow() + IST_OFFSET - timedelta(days=days)).date().isoformat()
+    prev_cutoff = (datetime.utcnow() + IST_OFFSET - timedelta(days=days * 2)).date().isoformat()
+    slumps = []
+    try:
+        cur.execute(
+            f"""SELECT student_name,
+                       COUNT(*) FILTER (WHERE date >= %s AND status='Present') AS recent_present,
+                       COUNT(*) FILTER (WHERE date >= %s) AS recent_total,
+                       COUNT(*) FILTER (WHERE date < %s AND date >= %s AND status='Present') AS prior_present,
+                       COUNT(*) FILTER (WHERE date < %s AND date >= %s) AS prior_total
+                FROM attendance
+                WHERE {scope_att}
+                GROUP BY student_name
+                HAVING COUNT(*) FILTER (WHERE date >= %s) > 0
+                   AND COUNT(*) FILTER (WHERE date < %s AND date >= %s) > 0""",
+            (cutoff, cutoff, cutoff, prev_cutoff, cutoff, prev_cutoff, scope_param, cutoff, cutoff, prev_cutoff),
+        )
+        for row in cur.fetchall():
+            rp, rt = int(row["recent_present"] or 0), int(row["recent_total"] or 0)
+            pp, pt = int(row["prior_present"] or 0), int(row["prior_total"] or 0)
+            if rt == 0 or pt == 0: continue
+            recent_pct = 100 * rp / rt; prior_pct = 100 * pp / pt
+            drop = prior_pct - recent_pct
+            if drop >= 20:
+                slumps.append({
+                    "student_name": row["student_name"], "kind": "attendance",
+                    "recent_pct": round(recent_pct, 1), "prior_pct": round(prior_pct, 1), "drop": round(drop, 1),
+                    "note": f"Attendance fell from {round(prior_pct)}% to {round(recent_pct)}% over the last {days} days.",
+                })
+    except Exception as exc:
+        conn.rollback(); print(f"[slump] attendance query failed: {exc}")
+    try:
+        cur.execute(
+            """SELECT student_name, marks, overall_marks, exam_date
+               FROM exam_results
+               WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)
+               ORDER BY student_name, exam_date DESC""",
+            (institute.id,),
+        )
+        by_student = defaultdict(list)
+        for row in cur.fetchall():
+            if row["marks"] is None or not row["overall_marks"]: continue
+            pct = 100 * float(row["marks"]) / float(row["overall_marks"])
+            by_student[row["student_name"]].append((row["exam_date"], pct))
+        for name, entries in by_student.items():
+            if len(entries) < 2: continue
+            latest_date, latest_pct = entries[0]
+            earlier = [p for _, p in entries[1:4]]
+            if not earlier: continue
+            avg_prior = sum(earlier) / len(earlier)
+            drop = avg_prior - latest_pct
+            if drop >= 10:
+                slumps.append({
+                    "student_name": name, "kind": "score",
+                    "recent_pct": round(latest_pct, 1), "prior_pct": round(avg_prior, 1), "drop": round(drop, 1),
+                    "note": f"Latest test on {latest_date} scored {round(latest_pct)}% vs a prior average of {round(avg_prior)}%.",
+                })
+    except Exception as exc:
+        conn.rollback(); print(f"[slump] score query failed: {exc}")
+    conn.close()
+    slumps.sort(key=lambda x: x["drop"], reverse=True)
+    return {"window_days": days, "count": len(slumps), "slumps": slumps[:40]}
+
+
 # ---------------------------------------------------------------------------
-# Dashboard analytics
+# Audit History
+# ---------------------------------------------------------------------------
+
+@app.get("/api/audit-log")
+def list_audit_log(
+    branch_id: int | None = None,
+    limit: int = 200,
+    offset: int = 0,
+    institute: CurrentInstitute = Depends(require_owner),
+):
+    limit = max(1, min(limit, 500)); offset = max(0, offset)
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        where = ["(b.tenant_id = %s OR a.branch_id IS NULL)"]
+        params: list = [institute.id]
+        if branch_id is not None:
+            where.append("a.branch_id = %s"); params.append(branch_id)
+        params.extend([limit, offset])
+        cur.execute(
+            f"""
+            SELECT a.id, a.timestamp, a.user_id, a.branch_id, a.action_type, a.before_after_payload,
+                   COALESCE(s.full_name, i.full_name, i.institute_name) AS user_name,
+                   b.name AS branch_name
+            FROM audit_log a
+            LEFT JOIN branches b ON b.id = a.branch_id
+            LEFT JOIN staff_users s ON s.id = a.user_id AND s.institute_id = %s
+            LEFT JOIN institutes i ON i.id = a.user_id
+            WHERE {' AND '.join(where)}
+            ORDER BY a.timestamp DESC
+            LIMIT %s OFFSET %s
+            """,
+            (institute.id, *params),
+        )
+        rows = cur.fetchall()
+        out = []
+        for r in rows:
+            payload = r["before_after_payload"]
+            if isinstance(payload, str):
+                try: payload = json.loads(payload)
+                except (TypeError, ValueError): payload = {}
+            out.append({
+                "id": r["id"],
+                "timestamp": r["timestamp"].isoformat() if hasattr(r["timestamp"], "isoformat") else str(r["timestamp"]),
+                "user_id": r["user_id"],
+                "user_name": r["user_name"] or "System",
+                "branch_id": r["branch_id"],
+                "branch_name": r["branch_name"],
+                "action_type": r["action_type"],
+                "payload": payload or {},
+            })
+        return {"entries": out, "limit": limit, "offset": offset}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Journal
+# ---------------------------------------------------------------------------
+
+class JournalCreate(BaseModel):
+    content: str
+    branch_id: int | None = None
+
+
+@app.get("/api/journal")
+def list_journal(branch_id: int | None = None, limit: int = 200, institute: CurrentInstitute = Depends(require_owner)):
+    limit = max(1, min(limit, 500))
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        if branch_id is not None:
+            cur.execute(
+                """SELECT id, branch_id, author_user_id, author_name, content, created_at
+                   FROM journal_entries WHERE institute_id = %s AND branch_id = %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (institute.id, branch_id, limit),
+            )
+        else:
+            cur.execute(
+                """SELECT id, branch_id, author_user_id, author_name, content, created_at
+                   FROM journal_entries WHERE institute_id = %s
+                   ORDER BY created_at DESC LIMIT %s""",
+                (institute.id, limit),
+            )
+        rows = cur.fetchall()
+        return [{
+            "id": r["id"], "branch_id": r["branch_id"],
+            "author_user_id": r["author_user_id"], "author_name": r["author_name"] or "Director",
+            "content": r["content"],
+            "created_at": r["created_at"].isoformat() if hasattr(r["created_at"], "isoformat") else str(r["created_at"]),
+        } for r in rows]
+    finally:
+        conn.close()
+
+
+@app.post("/api/journal")
+def create_journal(req: JournalCreate, institute: CurrentInstitute = Depends(require_owner)):
+    content = (req.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Journal entry cannot be empty.")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO journal_entries (institute_id, branch_id, author_user_id, author_name, content)
+               VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at""",
+            (institute.id, req.branch_id, institute.user_id, institute.full_name or institute.institute_name, content),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        audit_write(institute, req.branch_id, "CREATE_JOURNAL", None, {"id": row["id"]})
+        return {"id": row["id"], "created_at": row["created_at"].isoformat() if hasattr(row["created_at"], "isoformat") else str(row["created_at"])}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/journal/{entry_id}")
+def delete_journal(entry_id: int, institute: CurrentInstitute = Depends(require_owner)):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM journal_entries WHERE id = %s AND institute_id = %s RETURNING id", (entry_id, institute.id))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Journal entry not found")
+        conn.commit()
+        audit_write(institute, None, "DELETE_JOURNAL", {"id": entry_id}, None)
+        return {"status": "deleted"}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Inquiry & Lead Tracker
+# ---------------------------------------------------------------------------
+
+class InquiryCreate(BaseModel):
+    name: str
+    phone: str | None = None
+    email: str | None = None
+    source: str | None = None
+    interested_in: str | None = None
+    status: str | None = "New"
+    notes: str | None = None
+    follow_up_date: str | None = None
+
+
+class InquiryUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    source: str | None = None
+    interested_in: str | None = None
+    status: str | None = None
+    notes: str | None = None
+    follow_up_date: str | None = None
+
+
+@app.get("/api/inquiries/{branch_id}")
+def list_inquiries(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
+    check_module_access(institute, "inquiry")
+    verify_branch_read_access(branch_id, institute.id)
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        if branch_id == 0:
+            cur.execute(
+                """SELECT i.* FROM inquiries i JOIN branches b ON b.id = i.branch_id
+                   WHERE b.tenant_id = %s ORDER BY i.created_at DESC LIMIT 500""",
+                (institute.id,),
+            )
+        else:
+            cur.execute("SELECT * FROM inquiries WHERE branch_id = %s ORDER BY created_at DESC LIMIT 500", (branch_id,))
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+@app.post("/api/inquiries/{branch_id}")
+def create_inquiry(branch_id: int, req: InquiryCreate, institute: CurrentInstitute = Depends(require_write_access)):
+    check_module_access(institute, "inquiry")
+    verify_branch_ownership(branch_id, institute.id)
+    if not (req.name or "").strip():
+        raise HTTPException(status_code=400, detail="Name is required.")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO inquiries (branch_id, name, phone, email, source, interested_in, status, notes, follow_up_date)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING *""",
+            (branch_id, req.name.strip(), req.phone, req.email, req.source, req.interested_in,
+             req.status or "New", req.notes, req.follow_up_date),
+        )
+        row = dict(cur.fetchone()); conn.commit()
+        audit_write(institute, branch_id, "CREATE_INQUIRY", None, {"id": row["id"], "name": row["name"]})
+        return row
+    finally:
+        conn.close()
+
+
+@app.patch("/api/inquiries/{inquiry_id}")
+def update_inquiry(inquiry_id: int, req: InquiryUpdate, institute: CurrentInstitute = Depends(require_write_access)):
+    check_module_access(institute, "inquiry")
+    updates, params = [], []
+    for field in ("name", "phone", "email", "source", "interested_in", "status", "notes", "follow_up_date"):
+        value = getattr(req, field)
+        if value is not None:
+            updates.append(f"{field} = %s"); params.append(value)
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update.")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            f"""UPDATE inquiries SET {', '.join(updates)}
+                WHERE id = %s AND branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)
+                RETURNING *""",
+            (*params, inquiry_id, institute.id),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Inquiry not found")
+        conn.commit()
+        audit_write(institute, row["branch_id"], "UPDATE_INQUIRY", None, {"id": inquiry_id})
+        return dict(row)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/inquiries/{inquiry_id}")
+def delete_inquiry(inquiry_id: int, institute: CurrentInstitute = Depends(require_write_access)):
+    check_module_access(institute, "inquiry")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM inquiries WHERE id = %s AND branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) RETURNING id",
+            (inquiry_id, institute.id),
+        )
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Inquiry not found")
+        conn.commit()
+        audit_write(institute, None, "DELETE_INQUIRY", {"id": inquiry_id}, None)
+        return {"status": "deleted"}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Dashboard
 # ---------------------------------------------------------------------------
 
 def _parse_time_range(time_slot: str):
     import re
     m = re.match(r"\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*-\s*(\d{1,2}:\d{2}\s*[AaPp][Mm])\s*", time_slot or "")
-    if not m:
-        return None, None
+    if not m: return None, None
     try:
         start = datetime.strptime(m.group(1).upper().replace(" ", ""), "%I:%M%p").time()
         end = datetime.strptime(m.group(2).upper().replace(" ", ""), "%I:%M%p").time()
@@ -1772,13 +1899,9 @@ def _time_ranges_overlap(a: str, b: str) -> bool:
 @app.get("/api/dashboard/{branch_id}")
 def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
     verify_branch_read_access(branch_id, institute.id)
-    conn = get_conn()
-    cursor = conn.cursor()
-
+    conn = get_conn(); cursor = conn.cursor()
     now_ist = datetime.utcnow() + IST_OFFSET
-    today = now_ist.date()
-    week_start = today - timedelta(days=6)
-
+    today = now_ist.date(); week_start = today - timedelta(days=6)
     attendance_week = []
     if institute.is_owner or "attendance" in institute.allowed_modules:
         cursor.execute("SELECT id, name, batch FROM students WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)" if branch_id == 0 else "SELECT id, name, batch FROM students WHERE branch_id = %s", (institute.id if branch_id == 0 else branch_id,))
@@ -1792,12 +1915,10 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
             batch = student_batch.get(row["student_name"], "Unassigned")
             b = per_batch.setdefault(batch, {"present": 0, "total": 0})
             b["total"] += 1
-            if row["status"] == "Present":
-                b["present"] += 1
+            if row["status"] == "Present": b["present"] += 1
         for batch, stats in sorted(per_batch.items()):
             pct = round(100 * stats["present"] / stats["total"]) if stats["total"] else 0
             attendance_week.append({"batch": batch, "present": stats["present"], "total": stats["total"], "pct": pct})
-
     fees_pending_total, fees_pending_count = 0, 0
     if institute.is_owner or "fees" in institute.allowed_modules:
         cursor.execute(
@@ -1805,11 +1926,9 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
             (institute.id if branch_id == 0 else branch_id,),
         )
         fees_pending_count, fees_pending_total = cursor.fetchone()
-
     ongoing_lectures = []
     if institute.is_owner or "timetables" in institute.allowed_modules:
-        today_name = now_ist.strftime("%A")
-        now_time = now_ist.time()
+        today_name = now_ist.strftime("%A"); now_time = now_ist.time()
         cursor.execute(
             "SELECT batch_name, day, time_slot, subject, teacher, room FROM timetables_slots WHERE branch_id IN (SELECT id FROM branches WHERE tenant_id = %s) AND day = %s" if branch_id == 0 else "SELECT batch_name, day, time_slot, subject, teacher, room FROM timetables_slots WHERE branch_id = %s AND day = %s",
             (institute.id if branch_id == 0 else branch_id, today_name),
@@ -1817,23 +1936,13 @@ def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_curr
         for row in cursor.fetchall():
             start, end = _parse_time_range(row["time_slot"])
             if start and end and start <= now_time <= end:
-                ongoing_lectures.append({
-                    "batch_name": row["batch_name"], "time_slot": row["time_slot"],
-                    "subject": row["subject"], "teacher": row["teacher"], "room": row["room"],
-                })
-
+                ongoing_lectures.append({"batch_name": row["batch_name"], "time_slot": row["time_slot"], "subject": row["subject"], "teacher": row["teacher"], "room": row["room"]})
     conn.close()
-    return {
-        "attendance_week": attendance_week,
-        "fees_pending_total": fees_pending_total,
-        "fees_pending_count": fees_pending_count,
-        "ongoing_lectures": ongoing_lectures,
-        "as_of": now_ist.isoformat(),
-    }
+    return {"attendance_week": attendance_week, "fees_pending_total": fees_pending_total, "fees_pending_count": fees_pending_count, "ongoing_lectures": ongoing_lectures, "as_of": now_ist.isoformat()}
 
 
 # ---------------------------------------------------------------------------
-# Parallax — AI assistant over the institute's own data
+# Parallax
 # ---------------------------------------------------------------------------
 
 PARALLAX_TABLES = {
@@ -1855,8 +1964,7 @@ class AssistantQuery(BaseModel):
 
 
 def _parallax_gather_context(branch_id: int, institute: "CurrentInstitute") -> str:
-    conn = get_conn()
-    cursor = conn.cursor()
+    conn = get_conn(); cursor = conn.cursor()
     scope_hq = branch_id == 0
     blocks = []
     for table, base_sql in PARALLAX_TABLES.items():
@@ -1870,11 +1978,9 @@ def _parallax_gather_context(branch_id: int, institute: "CurrentInstitute") -> s
             sql = f"{base_sql} WHERE branch_id = %s LIMIT {PARALLAX_MAX_ROWS_PER_TABLE}"
             params = (branch_id,)
         try:
-            cursor.execute(sql, params)
-            rows = [dict(r) for r in cursor.fetchall()]
+            cursor.execute(sql, params); rows = [dict(r) for r in cursor.fetchall()]
         except Exception:
-            conn.rollback()
-            rows = []
+            conn.rollback(); rows = []
         if rows:
             blocks.append(f"### {table} ({len(rows)} rows)\n{json.dumps(rows, default=str)}")
     conn.close()
@@ -1886,7 +1992,6 @@ def _parallax_call_gemini(context: str, question: str) -> str:
         raise HTTPException(status_code=503, detail="Parallax is not configured: GEMINI_API_KEY is missing on the server.")
     import urllib.request
     import urllib.error
-
     prompt = (
         "You are Parallax, an in-app data assistant for a school/institute management system. "
         "Answer the user's question using ONLY the data given below. The question may be phrased "
@@ -1926,24 +2031,21 @@ def parallax_ask(branch_id: int, body: AssistantQuery, institute: CurrentInstitu
 
 @app.delete("/api/assistant/history/{branch_id}")
 def clear_parallax_history(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
-    check_module_access(institute,"assistant")
-    verify_branch_read_access(branch_id,institute.id)
-    return {"status":"cleared","persistent_history":False}
+    check_module_access(institute, "assistant")
+    verify_branch_read_access(branch_id, institute.id)
+    return {"status": "cleared", "persistent_history": False}
+
 
 # ---------------------------------------------------------------------------
 # Frontend
 # ---------------------------------------------------------------------------
 
+HTML_CONTENT = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+
 @app.get("/", response_class=HTMLResponse)
 def read_root():
     return HTMLResponse(content=HTML_CONTENT, status_code=200)
 
-
-HTML_CONTENT = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
-
-# ---------------------------------------------------------------------------
-# PWA assets
-# ---------------------------------------------------------------------------
 
 MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 SERVICE_WORKER_PATH = Path(__file__).with_name("sw.js")
@@ -1962,6 +2064,7 @@ def get_service_worker():
 
 if ICONS_DIR.exists():
     app.mount("/icons", StaticFiles(directory=str(ICONS_DIR)), name="icons")
+
 
 # ---------------------------------------------------------------------------
 # Examination module (Results / History)
@@ -2042,8 +2145,7 @@ def _exam_branch_check(institute, branch_id: int, module: str):
         conn.close()
 
 def _valid_marks(marks, overall):
-    if marks is None:
-        return None
+    if marks is None: return None
     if marks < 0 or marks > overall:
         raise HTTPException(status_code=400, detail="Student marks must be between 0 and the overall marks.")
     return marks
@@ -2097,8 +2199,8 @@ def create_exam_result(payload: ExamResultPayload, institute: CurrentInstitute =
             INSERT INTO exam_results
             (branch_id,batch_name,subjects,topics,exam_date,overall_marks,student_id,student_name,roll_number,marks)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *
-        """, (payload.branch_id,payload.batch_name.strip(),payload.subjects.strip(),payload.topics.strip(),payload.exam_date,
-              overall,payload.student_id,payload.student_name.strip(),payload.roll_number,marks))
+        """, (payload.branch_id, payload.batch_name.strip(), payload.subjects.strip(), payload.topics.strip(), payload.exam_date,
+              overall, payload.student_id, payload.student_name.strip(), payload.roll_number, marks))
         row = dict(cur.fetchone()); conn.commit(); return row
     finally:
         conn.close()
@@ -2114,8 +2216,8 @@ def update_exam_result(result_id: int, payload: ExamResultPayload, institute: Cu
             UPDATE exam_results SET batch_name=%s, subjects=%s, topics=%s, exam_date=%s,
               overall_marks=%s, student_id=%s, student_name=%s, roll_number=%s, marks=%s, updated_at=NOW()
             WHERE id=%s AND branch_id=%s RETURNING *
-        """, (payload.batch_name.strip(),payload.subjects.strip(),payload.topics.strip(),payload.exam_date,
-              payload.overall_marks,payload.student_id,payload.student_name.strip(),payload.roll_number,marks,result_id,payload.branch_id))
+        """, (payload.batch_name.strip(), payload.subjects.strip(), payload.topics.strip(), payload.exam_date,
+              payload.overall_marks, payload.student_id, payload.student_name.strip(), payload.roll_number, marks, result_id, payload.branch_id))
         row = cur.fetchone()
         if not row: raise HTTPException(status_code=404, detail="Result record not found")
         result = dict(row); conn.commit(); return result
@@ -2128,9 +2230,9 @@ def delete_exam_result(result_id: int, institute: CurrentInstitute = Depends(req
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("DELETE FROM exam_results WHERE id=%s AND branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) RETURNING id", (result_id,institute.id))
+        cur.execute("DELETE FROM exam_results WHERE id=%s AND branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) RETURNING id", (result_id, institute.id))
         if not cur.fetchone(): raise HTTPException(status_code=404, detail="Result record not found")
-        conn.commit(); return {"status":"success"}
+        conn.commit(); return {"status": "success"}
     finally:
         conn.close()
 
@@ -2151,8 +2253,8 @@ def create_exam_history(payload: ExamHistoryPayload, institute: CurrentInstitute
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("INSERT INTO exam_history (branch_id,subject,topic,batch_name,exam_date) VALUES (%s,%s,%s,%s,%s) RETURNING *", (payload.branch_id,payload.subject.strip(),payload.topic.strip(),payload.batch_name.strip(),payload.exam_date))
-        row=dict(cur.fetchone()); conn.commit(); return row
+        cur.execute("INSERT INTO exam_history (branch_id,subject,topic,batch_name,exam_date) VALUES (%s,%s,%s,%s,%s) RETURNING *", (payload.branch_id, payload.subject.strip(), payload.topic.strip(), payload.batch_name.strip(), payload.exam_date))
+        row = dict(cur.fetchone()); conn.commit(); return row
     finally:
         conn.close()
 
@@ -2162,10 +2264,10 @@ def update_exam_history(history_id: int, payload: ExamHistoryPayload, institute:
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE exam_history SET subject=%s, topic=%s, batch_name=%s, exam_date=%s, updated_at=NOW() WHERE id=%s AND branch_id=%s RETURNING *", (payload.subject.strip(),payload.topic.strip(),payload.batch_name.strip(),payload.exam_date,history_id,payload.branch_id))
-        row=cur.fetchone()
+        cur.execute("UPDATE exam_history SET subject=%s, topic=%s, batch_name=%s, exam_date=%s, updated_at=NOW() WHERE id=%s AND branch_id=%s RETURNING *", (payload.subject.strip(), payload.topic.strip(), payload.batch_name.strip(), payload.exam_date, history_id, payload.branch_id))
+        row = cur.fetchone()
         if not row: raise HTTPException(status_code=404, detail="History record not found")
-        result=dict(row); conn.commit(); return result
+        result = dict(row); conn.commit(); return result
     finally:
         conn.close()
 
@@ -2174,9 +2276,9 @@ def delete_exam_history(history_id: int, institute: CurrentInstitute = Depends(r
     check_module_access(institute, "history")
     conn = get_conn()
     try:
-        cur=conn.cursor()
-        cur.execute("DELETE FROM exam_history WHERE id=%s AND branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) RETURNING id", (history_id,institute.id))
+        cur = conn.cursor()
+        cur.execute("DELETE FROM exam_history WHERE id=%s AND branch_id IN (SELECT id FROM branches WHERE tenant_id=%s) RETURNING id", (history_id, institute.id))
         if not cur.fetchone(): raise HTTPException(status_code=404, detail="History record not found")
-        conn.commit(); return {"status":"success"}
+        conn.commit(); return {"status": "success"}
     finally:
         conn.close()
