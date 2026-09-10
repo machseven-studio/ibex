@@ -761,6 +761,17 @@
         // ----- Utility -----
         function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
 
+        // Turns any API error shape (string / dict / FastAPI 422 validation
+        // array) into a plain readable string instead of "[object Object]".
+        function apiErrorMessage(detail, fallback) {
+            if (typeof detail === 'string' && detail.trim()) return detail;
+            if (Array.isArray(detail) && detail.length) {
+                return detail.map(d => (d && typeof d === 'object') ? (d.msg || JSON.stringify(d)) : String(d)).join('; ');
+            }
+            if (detail && typeof detail === 'object') return detail.msg || detail.message || detail.error || JSON.stringify(detail);
+            return fallback;
+        }
+
         // ----- Auth -----
         function showSignup(e) { e.preventDefault(); document.getElementById('loginForm').classList.add('hidden'); document.getElementById('signupForm').classList.remove('hidden'); }
         function showLogin(e) { e.preventDefault(); document.getElementById('signupForm').classList.add('hidden'); document.getElementById('loginForm').classList.remove('hidden'); }
@@ -957,7 +968,7 @@
                 body: JSON.stringify({ name: n.trim() })
             });
             const d = await r.json().catch(() => ({}));
-            if (!r.ok) return alert(d.detail || 'Could not rename branch.');
+            if (!r.ok) return alert(apiErrorMessage(d.detail, 'Could not rename branch.'));
             await loadBranches();
             refreshCurrentModule();
         };
@@ -968,7 +979,7 @@
             if (!confirm(`Delete "${b.name}"?\n\nALL students, teachers, classrooms, attendance, syllabus, timetables, seating plans, fees, results and history in this branch will be permanently wiped.\n\nThis cannot be undone.`)) return;
             const r = await authFetch(`/api/branches/${b.id}`, { method: 'DELETE' });
             const d = await r.json().catch(() => ({}));
-            if (!r.ok) return alert(d.detail || 'Could not delete branch.');
+            if (!r.ok) return alert(apiErrorMessage(d.detail, 'Could not delete branch.'));
             currentBranchId = null;
             await loadBranches();
             refreshCurrentModule();
@@ -1042,27 +1053,34 @@
 
         // ----- Auto-hide top bar on scroll -----
         (function setupHeaderAutoHide() {
-            const scroller = document.getElementById('mainContent');
             const header = document.getElementById('appHeader');
-            if (!scroller || !header) return;
-            let lastScrollTop = 0;
-            const HIDE_THRESHOLD = 12;
-            scroller.addEventListener('scroll', () => {
-                const top = scroller.scrollTop;
+            if (!header) return;
+            const getTop = () => window.pageYOffset || document.documentElement.scrollTop || document.body.scrollTop || (document.getElementById('mainContent') || {}).scrollTop || 0;
+            let lastTop = getTop();
+            const HIDE_THRESHOLD = 8;
+            function onScroll() {
+                const top = getTop();
                 if (top <= 4) {
                     header.classList.remove('header-hidden');
-                    lastScrollTop = top;
+                    lastTop = top;
                     return;
                 }
-                const delta = top - lastScrollTop;
+                const delta = top - lastTop;
                 if (delta > HIDE_THRESHOLD) {
                     header.classList.add('header-hidden');
-                    lastScrollTop = top;
+                    lastTop = top;
                 } else if (delta < -HIDE_THRESHOLD) {
                     header.classList.remove('header-hidden');
-                    lastScrollTop = top;
+                    lastTop = top;
                 }
-            }, { passive: true });
+            }
+            // #appContainer is min-h-screen (grows with content), so the page
+            // itself scrolls on window/documentElement — not #mainContent.
+            // Listen on both so this keeps working regardless of which one
+            // ends up with the actual overflow.
+            window.addEventListener('scroll', onScroll, { passive: true });
+            const scroller = document.getElementById('mainContent');
+            if (scroller) scroller.addEventListener('scroll', onScroll, { passive: true });
         })();
 
         function toggleSidebar() {
@@ -1523,7 +1541,7 @@
             if (!utr.trim()) { alert('UTR / Reference No. is mandatory.'); return; }
             const res = await authFetch(`/api/fees/${feeId}/mark-paid`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ utr_reference: utr.trim() }) });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { alert(data.detail || 'Failed to mark fee as paid.'); return; }
+            if (!res.ok) { alert(apiErrorMessage(data.detail, 'Failed to mark fee as paid.')); return; }
             await loadModuleRecords('fees');
         }
 
@@ -1716,7 +1734,7 @@
             try {
                 const res = await authFetch(`/api/attendance/history/${currentBranchId}?student_name=${encodeURIComponent(studentName)}`);
                 const data = await res.json();
-                if (!res.ok) { body.innerHTML = `<p class="text-xs text-red-400 py-6 text-center">${esc(data.detail || 'Could not load history.')}</p>`; return; }
+                if (!res.ok) { body.innerHTML = `<p class="text-xs text-red-400 py-6 text-center">${esc(apiErrorMessage(data.detail, 'Could not load history.'))}</p>`; return; }
                 attendanceHistoryData = data;
                 summary.innerHTML = `
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Marked</div><div class="text-xl font-black gold-gradient-text mt-1">${data.total_marked}</div></div>
@@ -1792,7 +1810,7 @@
                 await loadModuleRecords(moduleName);
             } else {
                 const err = await res.json().catch(() => ({}));
-                alert(err.detail || 'Failed to delete record.');
+                alert(apiErrorMessage(err.detail, 'Failed to delete record.'));
             }
         }
 
@@ -1824,7 +1842,7 @@
                 await loadModuleRecords(bulkImportModule);
                 alert(`Imported ${data.inserted} record(s) successfully.`);
             } else {
-                errorEl.textContent = data.detail || 'Import failed.';
+                errorEl.textContent = apiErrorMessage(data.detail, 'Import failed.');
             }
         }
 
@@ -1861,7 +1879,7 @@
                 document.getElementById('headerInstituteName').textContent = data.institute_name;
                 closeRenameInstituteModal();
             } else {
-                errorEl.textContent = data.detail || 'Failed to rename institute.';
+                errorEl.textContent = apiErrorMessage(data.detail, 'Failed to rename institute.');
             }
         }
 
@@ -1905,7 +1923,7 @@
                 return;
             }
             if (!res.ok) {
-                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="p-8 text-center text-red-400">${esc(parsed.detail || 'Failed to load users.')}</td></tr>`;
+                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="p-8 text-center text-red-400">${esc(apiErrorMessage(parsed.detail, 'Failed to load users.'))}</td></tr>`;
                 return;
             }
             usersCache = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.users) ? parsed.users : []);
@@ -1983,7 +2001,7 @@
                 });
                 const data = await res.json().catch(() => ({}));
                 if (res.ok) { closeUserModal(); await loadUsers(); }
-                else { errorEl.textContent = data.detail || 'Failed to update user.'; }
+                else { errorEl.textContent = apiErrorMessage(data.detail, 'Failed to update user.'); }
                 return;
             }
 
@@ -2002,7 +2020,7 @@
                 closeUserModal();
                 await loadUsers();
             } else {
-                errorEl.textContent = data.detail || 'Failed to create user.';
+                errorEl.textContent = apiErrorMessage(data.detail, 'Failed to create user.');
             }
         }
 
@@ -2107,7 +2125,7 @@
             const res = await authFetch(`/api/seating/${currentBranchId}`);
             const layouts = await res.json().catch(() => []);
             if (!res.ok) {
-                container.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-red-400">${esc(layouts.detail || 'Failed to load seating plans.')}</div>`;
+                container.innerHTML = `<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-red-400">${esc(apiErrorMessage(layouts.detail, 'Failed to load seating plans.'))}</div>`;
                 return;
             }
             window.seatingLayouts = Array.isArray(layouts) ? layouts : [];
@@ -2148,7 +2166,7 @@
                 body: JSON.stringify({ branch_id: currentBranchId, exam_date, room_number, rows, columns })
             });
             const data = await res.json().catch(() => ({}));
-            if (!res.ok) { alert(data.detail || 'Could not generate seating plan.'); return; }
+            if (!res.ok) { alert(apiErrorMessage(data.detail, 'Could not generate seating plan.')); return; }
             alert('Exam seating plan generated successfully.');
             const listRes = await authFetch(`/api/seating/${currentBranchId}`);
             window.seatingLayouts = await listRes.json();
@@ -2187,7 +2205,7 @@
         async function deleteSeatingLayout(layoutId) {
             if (!confirm('Delete this exam seating plan?')) return;
             const res = await authFetch(`/api/seating/${layoutId}`, { method: 'DELETE' });
-            if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.detail || 'Failed to delete seating plan.'); return; }
+            if (!res.ok) { const d = await res.json().catch(() => ({})); alert(apiErrorMessage(d.detail, 'Failed to delete seating plan.')); return; }
             window.seatingLayouts = (window.seatingLayouts || []).filter(x => x.id !== layoutId);
             renderSavedSeatingLayouts();
         }
@@ -2390,7 +2408,7 @@
                 alert(`Timetable workspace cleared. ${data.slots_deleted || 0} lecture(s) removed.`);
                 refreshCurrentModule();
             } else {
-                alert(data.detail || 'Failed to clear timetables.');
+                alert(apiErrorMessage(data.detail, 'Failed to clear timetables.'));
             }
         }
 
@@ -2432,7 +2450,7 @@
                 refreshCurrentModule();
             } else {
                 const err = await res.json().catch(() => ({}));
-                alert(err.detail || 'Failed to generate timetable.');
+                alert(apiErrorMessage(err.detail, 'Failed to generate timetable.'));
             }
         }
 
@@ -2568,7 +2586,7 @@
                 await loadModuleRecords(moduleName);
             } else {
                 const errData = await res.json().catch(() => ({}));
-                errorEl.textContent = errData.detail || 'Failed to save record.';
+                errorEl.textContent = apiErrorMessage(errData.detail, 'Failed to save record.');
             }
         }
 
@@ -2730,7 +2748,7 @@
                 if (res.ok) {
                     resultDiv.textContent = `Sent ${data.sent || 0} reminders.`;
                 } else {
-                    resultDiv.textContent = data.detail || 'Failed to send reminders.';
+                    resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to send reminders.');
                 }
             } catch (e) {
                 resultDiv.textContent = 'Error sending reminders.';
@@ -2804,7 +2822,7 @@
             const text = await r.text();
             let data = {};
             try { data = text ? JSON.parse(text) : {}; } catch (_) { data = {detail:text}; }
-            if (!r.ok) throw new Error(data.detail || `Request failed (${r.status})`);
+            if (!r.ok) throw new Error(apiErrorMessage(data.detail, `Request failed (${r.status})`));
             return data;
           };
           const branchId = () => {
