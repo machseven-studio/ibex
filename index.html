@@ -53,6 +53,9 @@
             filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
 
+        .header-autohide { transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform; }
+        .header-autohide.header-hidden { transform: translateY(-100%); }
+
         .gold-border { border-color: rgba(212, 175, 55, 0.28); }
         .gold-border-glow:focus, .gold-border-glow:hover {
             border-color: #D4AF37;
@@ -60,6 +63,18 @@
         }
 
         .gold-bg { background: linear-gradient(135deg, #EACD6E, #AA771C); }
+
+        .parallax-answer-gold {
+            font-family: 'Cormorant Garamond', serif;
+            font-weight: 700;
+            font-size: 1.15rem;
+            line-height: 1.65;
+            letter-spacing: 0.01em;
+            background: linear-gradient(135deg, #F4E5A1 0%, #E8C767 20%, #BF953F 45%, #8a6a22 60%, #E8C767 80%, #F4E5A1 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
+        }
 
         .glass-panel {
             background: linear-gradient(160deg, rgba(40, 8, 8, 0.88), rgba(10, 2, 2, 0.96));
@@ -452,7 +467,7 @@
         <div class="glass-panel w-full max-w-md p-8 rounded-2xl shadow-2xl relative z-10 border gold-border">
             <div class="text-center mb-8">
                 <div class="inline-block p-3 rounded-full bg-[#121212] border gold-border mb-4 shadow-lg">
-                    <span class="text-2xl font-black gold-gradient-text">⚡</span>
+                    <img src="/icons/icon-192.png" alt="I.B.E.X." class="w-12 h-12 object-contain rounded-full" onerror="this.replaceWith(Object.assign(document.createElement('span'), {className: 'text-2xl font-black gold-gradient-text', textContent: '⚡'}))">
                 </div>
                 <h1 class="text-4xl font-black gold-gradient-text tracking-wider">I.B.E.X.</h1>
                 <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Enterprise Institutional Portal</p>
@@ -504,7 +519,7 @@
 
     <!-- MAIN APP -->
     <div id="appContainer" class="min-h-screen flex flex-col hidden">
-        <header class="border-b gold-border flex justify-between items-center sticky top-0 z-40" style="background:rgba(10,3,3,0.92); padding: 0.5rem 1.5rem;">
+        <header id="appHeader" class="border-b gold-border flex justify-between items-center sticky top-0 z-40 header-autohide" style="background:rgba(10,3,3,0.92); padding: 0.5rem 1.5rem;">
             <div class="flex items-center space-x-4">
                 <button id="mobileSidebarToggle" type="button" aria-label="Toggle sidebar" title="Toggle sidebar" onclick="toggleSidebar()">‹</button>
                 <div class="group flex items-center space-x-2">
@@ -964,7 +979,7 @@
             const groups = document.getElementById('moduleGroups');
             if (!groups) return;
             groups.innerHTML = ACCESS_HEADS.filter(h => isOwner || myAllowedModules.includes(h)).map(head => {
-                const open = head === 'homepage' && isOwner;
+                const open = false;
                 const children = HEAD_MODULES[head].filter(([m]) => m !== 'users' || isOwner);
                 const title = head === 'homepage' ? 'Homepage' : head === 'administrations' ? 'Administrations' : 'Examination';
                 return `<div class="mb-1 module-head-group" data-head="${head}">
@@ -997,9 +1012,15 @@
 
         function switchHead(head) {
             if (!isOwner && !myAllowedModules.includes(head)) return;
-            currentModule = 'home';
-            document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
-            refreshCurrentModule();
+            if (head === 'homepage') {
+                currentModule = 'home';
+                document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
+                refreshCurrentModule();
+                return;
+            }
+            // Administrations / Examination: reveal their child modules instead
+            // of redirecting to the homepage.
+            toggleModuleHead(head);
         }
 
         function applyResponsiveSidebarDefault() {
@@ -1018,6 +1039,31 @@
             }
         }
         window.addEventListener('resize', applyResponsiveSidebarDefault);
+
+        // ----- Auto-hide top bar on scroll -----
+        (function setupHeaderAutoHide() {
+            const scroller = document.getElementById('mainContent');
+            const header = document.getElementById('appHeader');
+            if (!scroller || !header) return;
+            let lastScrollTop = 0;
+            const HIDE_THRESHOLD = 12;
+            scroller.addEventListener('scroll', () => {
+                const top = scroller.scrollTop;
+                if (top <= 4) {
+                    header.classList.remove('header-hidden');
+                    lastScrollTop = top;
+                    return;
+                }
+                const delta = top - lastScrollTop;
+                if (delta > HIDE_THRESHOLD) {
+                    header.classList.add('header-hidden');
+                    lastScrollTop = top;
+                } else if (delta < -HIDE_THRESHOLD) {
+                    header.classList.remove('header-hidden');
+                    lastScrollTop = top;
+                }
+            }, { passive: true });
+        })();
 
         function toggleSidebar() {
             const sidebar = document.getElementById('moduleSidebar');
@@ -1229,7 +1275,7 @@
                             <div>
                                 <h2 class="welcome-animate command-heading-font text-3xl sm:text-5xl gold-gradient-text tracking-tight leading-tight">Welcome, ${myFullName || 'there'}</h2>
                             </div>
-                            <div id="homeIstClock" class="command-heading-font gold-gradient-text tracking-tight text-right shrink-0">
+                            <div id="homeIstClock" class="command-heading-font gold-gradient-text tracking-tight text-left shrink-0">
                                 <div class="text-lg sm:text-3xl"></div>
                                 <div class="text-lg sm:text-3xl"></div>
                             </div>
@@ -1644,12 +1690,12 @@
                 const mark = attendanceMarksToday[s.name];
                 const safeName = (s.name || '').replace(/'/g, "\\'");
                 return `
-                <div class="flex items-center justify-between py-3">
+                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 py-3">
                     <span class="text-sm font-medium text-gray-200">${esc(s.name)}</span>
-                    <div class="flex items-center space-x-2">
-                        <button onclick="openAttendanceHistory('${safeName}')" class="px-4 py-1.5 rounded-lg text-xs font-extrabold uppercase tracking-wider fast-transition bg-[#141414] text-gray-400 border gold-border hover:gold-gradient-text hover:text-yellow-300">Attendance History</button>
-                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Present')" class="px-4 py-1.5 rounded-lg text-xs font-extrabold uppercase tracking-wider fast-transition ${mark === 'Present' ? 'bg-green-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-green-400'}">Present</button>
-                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Absent')" class="px-4 py-1.5 rounded-lg text-xs font-extrabold uppercase tracking-wider fast-transition ${mark === 'Absent' ? 'bg-red-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-red-400'}">Absent</button>
+                    <div class="grid grid-cols-3 gap-1.5 sm:flex sm:items-center sm:gap-2 w-full sm:w-auto">
+                        <button onclick="openAttendanceHistory('${safeName}')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition bg-[#141414] text-gray-400 border gold-border hover:gold-gradient-text hover:text-yellow-300 whitespace-nowrap overflow-hidden text-ellipsis text-center"><span class="hidden sm:inline">Attendance History</span><span class="sm:hidden">History</span></button>
+                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Present')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Present' ? 'bg-green-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-green-400'}">Present</button>
+                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Absent')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Absent' ? 'bg-red-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-red-400'}">Absent</button>
                     </div>
                 </div>`;
             }).join('');
@@ -1996,6 +2042,15 @@
             renderParallaxThread();
         }
 
+        function cleanParallaxAnswer(text) {
+            return String(text ?? '')
+                .replace(/\*\*/g, '')
+                .replace(/\*/g, '')
+                .replace(/^\s{0,3}#{1,6}\s*/gm, '')
+                .replace(/#/g, '')
+                .trim();
+        }
+
         function renderParallaxThread() {
             const thread = document.getElementById('parallaxThread');
             if (!thread) return;
@@ -2008,7 +2063,7 @@
                     <div class="text-xs font-bold text-gray-300 uppercase tracking-wider">You asked</div>
                     <div class="text-sm text-gray-200">${esc(turn.question)}</div>
                     <div class="text-xs font-bold gold-gradient-text uppercase tracking-wider mt-3">Parallax</div>
-                    <div class="whitespace-pre-wrap ${turn.pending ? 'text-sm text-gray-500' : 'parallax-answer-gold'}">${turn.pending ? '<span class="text-gray-500">Thinking…</span>' : esc(turn.answer)}</div>
+                    <div class="whitespace-pre-wrap ${turn.pending ? 'text-sm text-gray-500' : 'parallax-answer-gold'}">${turn.pending ? '<span class="text-gray-500">Thinking…</span>' : esc(cleanParallaxAnswer(turn.answer))}</div>
                 </div>
                 <div class="border-t border-gray-800"></div>
             `).join('');
