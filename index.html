@@ -231,7 +231,6 @@
         .parallax-search-hit b { font-size: 12px; }
         .parallax-search-hit small { grid-column: 1/-1; color: #777; font-size: 10px; }
 
-        /* --- Branch selector: short & wide, horizontal layout --- */
         .branch-selector-stack {
             display: flex; flex-direction: row; align-items: center;
             gap: 8px; flex-wrap: nowrap;
@@ -281,7 +280,6 @@
         .whatsapp-log { max-height: 300px; overflow-y: auto; }
         .whatsapp-log-item { padding: 8px 12px; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
 
-        /* Journal golden styling */
         .journal-entry-gold {
             font-family: 'Cormorant Garamond', serif;
             font-weight: 600;
@@ -294,7 +292,6 @@
             filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
 
-        /* ---- Unified module header action buttons ---- */
         .ibex-action-btn {
             height: 42px;
             display: inline-flex;
@@ -320,7 +317,6 @@
         }
         .ibex-action-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 
-        /* ---- Home icon beside Enterprise Modules ---- */
         .sidebar-home-row { display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem 0.5rem 1.5rem; }
         .sidebar-home-btn {
             display: inline-flex; align-items: center; justify-content: center;
@@ -331,13 +327,10 @@
         }
         .sidebar-home-btn:hover { background: #1f1f1f; color: #F4E5A1; }
 
-        /* ---- Sidebar footer identity panel (moved from header) ---- */
         .sidebar-user-panel { border-top: 1px solid rgba(212,175,55,0.2); margin-top: 0.75rem; padding-top: 0.75rem; }
 
-        /* ---- Password re-verification gate modal ---- */
         #passwordGateModal .auth-error { min-height: 1rem; }
 
-        /* ---- Mobile loading overlay ---- */
         #mobileLoadingOverlay {
             position: fixed; inset: 0; z-index: 200; background: #0a0101;
             display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -564,7 +557,7 @@
                 <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Subject</label><input type="text" id="ttSlotEditSubject" required class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                 <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Teacher</label><input type="text" id="ttSlotEditTeacher" required class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
                 <div><label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">Room</label><input type="text" id="ttSlotEditRoom" required class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></div>
-                <p class="text-[11px] text-gray-500">Manual overrides aren't conflict-checked - you're taking the wheel on this one.</p>
+                <p class="text-[11px] text-gray-500">Manual overrides are overlap-checked against teacher, room, and batch.</p>
                 <div class="flex justify-end space-x-3 pt-4 border-t gold-border">
                     <button type="button" onclick="closeTimetableSlotEdit()" class="px-5 py-2.5 text-xs font-bold uppercase bg-gray-900 hover:bg-gray-800 text-gray-300 rounded-xl fast-transition">Cancel</button>
                     <button type="submit" class="px-6 py-2.5 text-xs font-extrabold uppercase gold-bg hover:opacity-95 text-black rounded-xl fast-transition shadow-lg">Save Changes</button>
@@ -666,13 +659,8 @@
         let myDesignation = 'Owner';
         let myAllowedModules = [];
         let bulkImportModule = null;
-        // One-shot module gate tokens (per sensitive module), refreshed by the server on each use.
         window.__moduleGateTokens = window.__moduleGateTokens || {};
 
-        // ============================================================
-        // NAVIGATION TAXONOMY — 4 parent heads
-        // Journal + Audit History now live under Management (front_office).
-        // ============================================================
         const ACCESS_HEADS = ['homepage', 'administrations', 'examination', 'front_office'];
         const HEAD_MODULES = {
             homepage: [
@@ -709,7 +697,6 @@
         const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination, ...HEAD_MODULES.front_office]
             .map(([m]) => m).filter(m => !OWNER_ONLY_MODULES.has(m));
 
-        // --- Auto-refresh session so logged-in users stay logged in across browser restarts
         (function setupSessionRefresh() {
             const REFRESH_MS = 12 * 60 * 60 * 1000;
             setInterval(() => {
@@ -726,7 +713,13 @@
         })();
 
         // ----- Utility -----
-        function esc(v) { return String(v ?? '').replace(/[&<>'"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[c])); }
+        // IBEX-SEC: single HTML-escape helper used for every DB/user/imported value
+        // rendered into innerHTML. Do not remove; do not "optimize" by skipping it.
+        function esc(v) {
+            return String(v ?? '').replace(/[&<>'"]/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[c]));
+        }
 
         function apiErrorMessage(detail, fallback) {
             if (typeof detail === 'string' && detail.trim()) return detail;
@@ -856,7 +849,6 @@
             document.getElementById('signupForm').classList.add('hidden');
         }
 
-        // --- authFetch: attaches the module gate token for gated modules ---
         const GATED_MODULES_CLIENT = new Set(['fees', 'users', 'journal', 'audit_history']);
         async function authFetch(url, options = {}) {
             const opts = { ...options };
@@ -871,14 +863,12 @@
                 document.getElementById('loginError').textContent = 'Session expired. Please log in again.';
                 throw new Error('Session expired');
             }
-            // Clear stale gate tokens so the next entry re-prompts.
             if (res.status === 403 && GATED_MODULES_CLIENT.has(currentModule)) {
                 delete window.__moduleGateTokens[currentModule];
             }
             return res;
         }
 
-        // ----- Mobile boot-time loading carousel -----
         const MOBILE_LOADING_LINES = [
             'Polishing dashboard metrics...',
             'Organizing records into readable insights...',
@@ -930,7 +920,6 @@
             }
         }
 
-        // Resume session on page load (persistent login)
         (async function tryResumeSession() {
             try {
                 const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
@@ -1016,6 +1005,7 @@
         window.editBranchRuntime = async function() {
             const b = branches.find(x => Number(x.id) === Number(currentBranchId));
             if (!b || myPermission === 'read_only') return;
+            if (!isOwner) { alert('Only the institute owner can rename branches.'); return; }
             const n = prompt('Rename branch:', b.name || '');
             if (n === null || !n.trim() || n.trim() === b.name) return;
             const r = await authFetch(`/api/branches/${b.id}`, {
@@ -1032,6 +1022,7 @@
         window.deleteBranchRuntime = async function() {
             const b = branches.find(x => Number(x.id) === Number(currentBranchId));
             if (!b || myPermission === 'read_only') return;
+            if (!isOwner) { alert('Only the institute owner can delete branches.'); return; }
             if (!confirm(`Delete "${b.name}"?\n\nALL students, teachers, classrooms, attendance, syllabus, timetables, seating plans, fees, results and history in this branch will be permanently wiped.\n\nThis cannot be undone.`)) return;
             const r = await authFetch(`/api/branches/${b.id}`, { method: 'DELETE' });
             const d = await r.json().catch(() => ({}));
@@ -1068,7 +1059,6 @@
             }).join('');
         }
 
-        // Modules that require a password re-verification popup before entry.
         const SENSITIVE_MODULES = new Set(['fees', 'users', 'audit_history', 'journal']);
         let __pendingGateAction = null;
 
@@ -1107,7 +1097,6 @@
                     errEl.textContent = 'Incorrect password. This attempt has been logged.';
                     return;
                 }
-                // Stash the one-shot gate token so sensitive API calls include it.
                 if (data.gate_token) {
                     window.__moduleGateTokens[__pendingGateAction.moduleKey] = data.gate_token;
                 }
@@ -1149,10 +1138,6 @@
 
         function switchHead(head) {
             if (!isOwner && head === 'homepage') return;
-            // Every parent head — including the renamed "Front Office" (formerly
-            // Homepage) — now just expands/collapses its children. Use the
-            // dedicated home icon beside "Enterprise Modules" to jump to the
-            // Welcome dashboard instead.
             toggleModuleHead(head);
         }
 
@@ -1232,7 +1217,6 @@
             if (button) button.classList.toggle('rotate-180');
         }
 
-        // ----- refreshCurrentModule -----
         async function refreshCurrentModule() {
             const container = document.getElementById('mainContent');
             if (!container) return;
@@ -1364,7 +1348,7 @@
                         ['Attendance', `${a.pct || 0}%`, `${a.present || 0} present / ${a.marked || 0} marked`],
                         ['Lectures', l.scheduled_this_week || 0, 'scheduled this week'],
                         ['Seating Plans', d.seating_plans || 0, 'saved exam layouts']
-                    ].map(k => `<div class="glass-panel border gold-border p-5 rounded-2xl"><div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2">${k[0]}</div><div class="text-2xl font-black gold-gradient-text">${k[1]}</div><div class="text-[10px] text-gray-500 mt-1">${k[2]}</div></div>`).join('')}
+                    ].map(k => `<div class="glass-panel border gold-border p-5 rounded-2xl"><div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2">${esc(k[0])}</div><div class="text-2xl font-black gold-gradient-text">${esc(k[1])}</div><div class="text-[10px] text-gray-500 mt-1">${esc(k[2])}</div></div>`).join('')}
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1517,7 +1501,7 @@
                         ['Attempts Graded', d.attempt_count, 'result rows'],
                         ['Overall Average', `${d.overall_average_pct ?? '—'}%`, 'across all attempts'],
                         ['Pass Threshold', `${d.pass_threshold_pct ?? 40}%`, 'below this = failing'],
-                    ].map(k => `<div class="glass-panel border gold-border p-5 rounded-2xl"><div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2">${k[0]}</div><div class="text-2xl font-black gold-gradient-text">${k[1]}</div><div class="text-[10px] text-gray-500 mt-1">${k[2]}</div></div>`).join('')}
+                    ].map(k => `<div class="glass-panel border gold-border p-5 rounded-2xl"><div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2">${esc(k[0])}</div><div class="text-2xl font-black gold-gradient-text">${k[1]}</div><div class="text-[10px] text-gray-500 mt-1">${esc(k[2])}</div></div>`).join('')}
                 </div>
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1594,7 +1578,7 @@
                     <div class="glass-panel border gold-border p-5 sm:p-10 rounded-3xl relative overflow-hidden shadow-2xl">
                         <div class="max-w-4xl relative z-10 flex items-end justify-between gap-6 flex-wrap">
                             <div>
-                                <h2 class="welcome-animate command-heading-font text-3xl sm:text-5xl gold-gradient-text tracking-tight leading-tight">Welcome, ${myFullName || 'there'}</h2>
+                                <h2 class="welcome-animate command-heading-font text-3xl sm:text-5xl gold-gradient-text tracking-tight leading-tight">Welcome, ${esc(myFullName || 'there')}</h2>
                             </div>
                             <div id="homeIstClock" class="command-heading-font gold-gradient-text tracking-tight text-left shrink-0">
                                 <div class="text-lg sm:text-3xl"></div>
@@ -1799,18 +1783,18 @@
                 <div class="space-y-6">
                     <div class="flex justify-between items-center flex-wrap gap-4">
                         <div>
-                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">${moduleName} Department</h2>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">${esc(moduleName)} Department</h2>
                             <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Scope Synchronized</p>
                         </div>
                         ${canWrite ? `
                         <div class="flex items-center flex-wrap gap-3">
-                            <button onclick="openRecordModal('${moduleName}')" class="ibex-action-btn primary">+ Add New Record</button>
-                            <button onclick="openBulkImportModal('${moduleName}')" class="ibex-action-btn secondary"><span>+ Add Document</span></button>
+                            <button onclick="openRecordModal('${esc(moduleName)}')" class="ibex-action-btn primary">+ Add New Record</button>
+                            <button onclick="openBulkImportModal('${esc(moduleName)}')" class="ibex-action-btn secondary"><span>+ Add Document</span></button>
                         </div>` : ''}
                     </div>
                     <div class="flex items-center justify-end flex-wrap gap-3">
-                        <button onclick="exportModulePDF('${moduleName}')" class="ibex-action-btn secondary"><span>Export PDF</span></button>
-                        <button onclick="exportModuleExcel('${moduleName}')" class="ibex-action-btn secondary"><span>Export Excel</span></button>
+                        <button onclick="exportModulePDF('${esc(moduleName)}')" class="ibex-action-btn secondary"><span>Export PDF</span></button>
+                        <button onclick="exportModuleExcel('${esc(moduleName)}')" class="ibex-action-btn secondary"><span>Export Excel</span></button>
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 overflow-x-auto shadow-2xl">
                         <table class="w-full text-left text-sm text-gray-300">
@@ -1834,23 +1818,32 @@
 
             if (records.length === 0) {
                 thead.innerHTML = `<tr><th class="p-4">Status</th></tr>`;
-                tbody.innerHTML = `<tr><td class="p-8 text-center text-gray-500">No records found for ${moduleName}. ${canWrite ? "Click '+ Add New Record' to create one." : ''}</td></tr>`;
+                tbody.innerHTML = `<tr><td class="p-8 text-center text-gray-500">No records found for ${esc(moduleName)}. ${canWrite ? "Click '+ Add New Record' to create one." : ''}</td></tr>`;
                 return;
             }
 
             const columns = getModuleColumns(moduleName, records);
 
-            thead.innerHTML = `<tr>${columns.map(c => `<th class="p-4 uppercase tracking-wider text-xs font-bold">${c.label}</th>`).join('')}${canWrite ? '<th class="p-4"></th>' : ''}</tr>`;
+            thead.innerHTML = `<tr>${columns.map(c => `<th class="p-4 uppercase tracking-wider text-xs font-bold">${esc(c.label)}</th>`).join('')}${canWrite ? '<th class="p-4"></th>' : ''}</tr>`;
             tbody.innerHTML = records.map(r => `
                 <tr class="border-b border-gray-900 hover:bg-[#121212] fast-transition">
                     ${columns.map(c => {
-                        let val = r[c.key];
-                        if (moduleName === 'fees' && c.key === 'amount_inr') { val = `₹${parseFloat(val || 0).toLocaleString('en-IN')}`; }
-                        if (c.key === 'document' && val) { val = `<a href="/api/uploads/${val}" target="_blank" class="text-yellow-500 underline text-xs font-semibold">View File</a>`; }
-                        else if (c.key === 'document' && !val) { val = `<span class="text-gray-600 text-xs">No File</span>`; }
-                        return `<td class="p-4 font-medium">${val ?? ''}</td>`;
+                        const raw = r[c.key];
+                        let cellHtml;
+                        if (c.key === 'document') {
+                            if (raw) {
+                                cellHtml = `<a href="/api/uploads/${encodeURIComponent(raw)}" target="_blank" class="text-yellow-500 underline text-xs font-semibold">View File</a>`;
+                            } else {
+                                cellHtml = `<span class="text-gray-600 text-xs">No File</span>`;
+                            }
+                        } else if (moduleName === 'fees' && c.key === 'amount_inr') {
+                            cellHtml = esc(`₹${parseFloat(raw || 0).toLocaleString('en-IN')}`);
+                        } else {
+                            cellHtml = esc(raw ?? '');
+                        }
+                        return `<td class="p-4 font-medium">${cellHtml}</td>`;
                     }).join('')}
-                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="markFeePaid(${r.id})" title="Mark paid" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${moduleName}', ${r.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${moduleName}', ${r.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
+                    ${canWrite ? `<td class="p-4 text-right whitespace-nowrap">${moduleName === 'fees' && String(r.status || '').toLowerCase() !== 'paid' ? `<button onclick="markFeePaid(${Number(r.id)})" title="Mark paid" class="gold-gradient-text font-bold text-xs mr-3">Mark Paid</button>` : ''}<button onclick="openRecordModal('${esc(moduleName)}', ${Number(r.id)})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('${esc(moduleName)}', ${Number(r.id)})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
                 </tr>
             `).join('');
         }
@@ -1940,32 +1933,42 @@
             students.forEach(s => {
                 const batch = (s.batch || '').trim() || 'Unassigned';
                 if (batch !== lastBatch) {
-                    rows += `<tr class="batch-group-row"><td colspan="${canWrite ? 5 : 4}" class="p-2.5 text-xs font-extrabold uppercase tracking-widest gold-gradient-text">${batch}</td></tr>`;
+                    rows += `<tr class="batch-group-row"><td colspan="${canWrite ? 5 : 4}" class="p-2.5 text-xs font-extrabold uppercase tracking-widest gold-gradient-text">${esc(batch)}</td></tr>`;
                     lastBatch = batch;
                 }
                 rows += `
                     <tr class="border-b border-gray-900 hover:bg-[#121212] fast-transition">
-                        <td class="p-4 font-medium">${s.name ?? ''}</td>
-                        <td class="p-4">${s.batch ?? ''}</td>
-                        <td class="p-4">${s.roll_number ?? ''}</td>
-                        <td class="p-4">${s.parent_contact ?? ''}</td>
-                        ${canWrite ? `<td class="p-4 text-right whitespace-nowrap"><button onclick="openRecordModal('students', ${s.id})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('students', ${s.id})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
+                        <td class="p-4 font-medium">${esc(s.name ?? '')}</td>
+                        <td class="p-4">${esc(s.batch ?? '')}</td>
+                        <td class="p-4">${esc(s.roll_number ?? '')}</td>
+                        <td class="p-4">${esc(s.parent_contact ?? '')}</td>
+                        ${canWrite ? `<td class="p-4 text-right whitespace-nowrap"><button onclick="openRecordModal('students', ${Number(s.id)})" title="Edit record" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button><button onclick="deleteRecord('students', ${Number(s.id)})" title="Delete record" class="row-delete-btn fast-transition text-lg leading-none">🗑</button></td>` : ''}
                     </tr>`;
             });
             tbody.innerHTML = rows;
         }
 
         // ----- Attendance -----
+        // IBEX-SEC: attendance is keyed on student_id, not name.
         let attendanceAllStudents = [];
-        let attendanceMarksToday = {};
-        const attendanceToday = new Date().toISOString().slice(0, 10);
+        let attendanceMarksToday = {}; // keyed by student_id
+
+        function getIstTodayIso() {
+            // IBEX-SEC: explicit Asia/Kolkata business date — do not rely on browser TZ.
+            const now = new Date();
+            const fmt = new Intl.DateTimeFormat('en-CA', {
+                timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit'
+            });
+            return fmt.format(now); // YYYY-MM-DD
+        }
+        const attendanceToday = getIstTodayIso();
 
         async function renderAttendanceModule(container) {
             container.innerHTML = `
                 <div class="space-y-6">
                     <div>
                         <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Attendance</h2>
-                        <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Batchwise • ${attendanceToday}</p>
+                        <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Batchwise • ${esc(attendanceToday)} (IST)</p>
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl space-y-5">
                         <div class="flex flex-wrap items-end gap-4">
@@ -1994,10 +1997,15 @@
                 authFetch(`/api/attendance/${currentBranchId}/${attendanceToday}`)
             ]);
             attendanceAllStudents = await sRes.json();
-            attendanceMarksToday = await aRes.json();
+            const marksPayload = await aRes.json();
+            // Backend returns {"<student_id>": {student_id, student_name, status}} or {"name:...": {...}}
+            attendanceMarksToday = {};
+            Object.values(marksPayload || {}).forEach(entry => {
+                if (entry && entry.student_id != null) attendanceMarksToday[String(entry.student_id)] = entry.status;
+            });
             const batches = [...new Set(attendanceAllStudents.map(s => (s.batch || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
             const select = document.getElementById('attendanceBatchSelect');
-            select.innerHTML = batches.length === 0 ? '<option value="">No batches found</option>' : batches.map(b => `<option value="${b}">${b}</option>`).join('');
+            select.innerHTML = batches.length === 0 ? '<option value="">No batches found</option>' : batches.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
             renderAttendanceStudentList();
         }
 
@@ -2010,19 +2018,20 @@
             if (query) students = students.filter(s => (s.name || '').toLowerCase().includes(query));
             students.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
             if (students.length === 0) {
-                listEl.innerHTML = `<p class="text-center text-gray-500 text-sm py-8">No students found${selectedBatch ? ` in ${selectedBatch}` : ''}.</p>`;
+                listEl.innerHTML = `<p class="text-center text-gray-500 text-sm py-8">No students found${selectedBatch ? ` in ${esc(selectedBatch)}` : ''}.</p>`;
                 return;
             }
             listEl.innerHTML = students.map(s => {
-                const mark = attendanceMarksToday[s.name];
-                const safeName = (s.name || '').replace(/'/g, "\\'");
+                const sid = Number(s.id);
+                const mark = attendanceMarksToday[String(sid)];
+                // IBEX-SEC: pass student_id via data attribute; never embed name in onclick.
                 return `
                 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 py-3">
                     <span class="text-sm font-medium text-gray-200">${esc(s.name)}</span>
                     <div class="grid grid-cols-3 gap-1.5 sm:flex sm:items-center sm:gap-2 w-full sm:w-auto">
-                        <button onclick="openAttendanceHistory('${safeName}')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition bg-[#141414] text-gray-400 border gold-border hover:gold-gradient-text hover:text-yellow-300 whitespace-nowrap overflow-hidden text-ellipsis text-center"><span class="hidden sm:inline">Attendance History</span><span class="sm:hidden">History</span></button>
-                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Present')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Present' ? 'bg-green-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-green-400'}">Present</button>
-                        <button ${canWrite ? '' : 'disabled'} onclick="markAttendance('${safeName}', 'Absent')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Absent' ? 'bg-red-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-red-400'}">Absent</button>
+                        <button data-student-id="${sid}" data-student-name="${esc(s.name)}" onclick="openAttendanceHistory(this.dataset.studentId, this.dataset.studentName)" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition bg-[#141414] text-gray-400 border gold-border hover:gold-gradient-text hover:text-yellow-300 whitespace-nowrap overflow-hidden text-ellipsis text-center"><span class="hidden sm:inline">Attendance History</span><span class="sm:hidden">History</span></button>
+                        <button data-student-id="${sid}" ${canWrite ? '' : 'disabled'} onclick="markAttendance(this.dataset.studentId, 'Present')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Present' ? 'bg-green-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-green-400'}">Present</button>
+                        <button data-student-id="${sid}" ${canWrite ? '' : 'disabled'} onclick="markAttendance(this.dataset.studentId, 'Absent')" class="px-2 sm:px-4 py-1.5 rounded-lg text-[10px] sm:text-xs font-extrabold uppercase tracking-wider fast-transition text-center ${mark === 'Absent' ? 'bg-red-600 text-white' : 'bg-[#141414] text-gray-400 border gold-border hover:text-red-400'}">Absent</button>
                     </div>
                 </div>`;
             }).join('');
@@ -2030,20 +2039,21 @@
 
         let attendanceHistoryData = null;
 
-        async function openAttendanceHistory(studentName) {
+        async function openAttendanceHistory(studentId, studentName) {
             const modal = document.getElementById('attendanceHistoryModal');
             const subtitle = document.getElementById('attendanceHistorySubtitle');
             const summary = document.getElementById('attendanceHistorySummary');
             const body = document.getElementById('attendanceHistoryBody');
             modal.classList.remove('hidden');
-            subtitle.textContent = studentName;
+            subtitle.textContent = studentName || `Student #${studentId}`;
             summary.innerHTML = '';
             body.innerHTML = '<p class="text-xs text-gray-500 py-6 text-center">Loading…</p>';
             attendanceHistoryData = null;
             try {
-                const res = await authFetch(`/api/attendance/history/${currentBranchId}?student_name=${encodeURIComponent(studentName)}`);
+                const res = await authFetch(`/api/attendance/history/${currentBranchId}?student_id=${encodeURIComponent(studentId)}`);
                 const data = await res.json();
                 if (!res.ok) { body.innerHTML = `<p class="text-xs text-red-400 py-6 text-center">${esc(apiErrorMessage(data.detail, 'Could not load history.'))}</p>`; return; }
+                data.student_name = data.student_name || studentName;
                 attendanceHistoryData = data;
                 summary.innerHTML = `
                     <div class="bg-[#0c0c0c] rounded-xl p-3 border gold-border text-center"><div class="text-[10px] text-gray-500 uppercase tracking-widest">Marked</div><div class="text-xl font-black gold-gradient-text mt-1">${data.total_marked}</div></div>
@@ -2070,36 +2080,40 @@
         function exportAttendanceHistoryPDF() {
             if (!attendanceHistoryData || !attendanceHistoryData.history.length) { alert('No attendance history to export yet.'); return; }
             const doc = new window.jspdf.jsPDF();
-            const startY = ibexPdfHeader(doc, 'Attendance History', `${attendanceHistoryData.student_name} · ${attendanceHistoryData.present_count} present / ${attendanceHistoryData.absent_count} absent`);
+            const safeName = (attendanceHistoryData.student_name || 'student').replace(/\s+/g, '_');
+            const startY = ibexPdfHeader(doc, 'Attendance History', `${attendanceHistoryData.student_name || ''} · ${attendanceHistoryData.present_count} present / ${attendanceHistoryData.absent_count} absent`);
             doc.autoTable({
                 startY,
                 head: [['Date', 'Status']],
                 body: attendanceHistoryData.history.map(h => [String(h.date || ''), String(h.status || '')]),
                 ...IBEX_PDF_TABLE_STYLE,
             });
-            doc.save(`${attendanceHistoryData.student_name.replace(/\s+/g, '_')}_attendance_history.pdf`);
+            doc.save(`${safeName}_attendance_history.pdf`);
         }
 
-        async function markAttendance(studentName, status) {
+        async function markAttendance(studentId, status) {
+            const sid = Number(studentId);
+            if (!sid) return;
             const res = await authFetch('/api/attendance/mark', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ branch_id: currentBranchId, student_name: studentName, date: attendanceToday, status })
+                body: JSON.stringify({ branch_id: currentBranchId, student_id: sid, date: attendanceToday, status })
             });
             if (res.ok) {
-                attendanceMarksToday[studentName] = status;
+                attendanceMarksToday[String(sid)] = status;
                 renderAttendanceStudentList();
                 if (status === 'Absent') {
                     try {
                         await authFetch('/api/whatsapp/send-absence', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ branch_id: currentBranchId, student_name: studentName, date: attendanceToday })
+                            body: JSON.stringify({ branch_id: currentBranchId, student_id: sid, date: attendanceToday })
                         });
                     } catch (e) { console.warn('WhatsApp absence notification failed:', e); }
                 }
             } else {
-                alert('Failed to mark attendance.');
+                const err = await res.json().catch(() => ({}));
+                alert(apiErrorMessage(err.detail, 'Failed to mark attendance.'));
             }
         }
 
@@ -2159,7 +2173,7 @@
 
         // ----- Institute rename -----
         function openRenameInstituteModal() {
-            if (myPermission === 'read_only') return;
+            if (!isOwner) return;
             document.getElementById('renameInstituteInput').value = document.getElementById('headerInstituteName').textContent.trim();
             document.getElementById('renameInstituteError').textContent = '';
             document.getElementById('renameInstituteModal').classList.remove('hidden');
@@ -2243,14 +2257,14 @@
                     <td class="p-4"><span class="perm-badge perm-readonly">${esc(u.designation || 'Staff')}</span></td>
                     <td class="p-4 text-xs text-gray-400">${(u.modules || []).length ? u.modules.map(m => esc(MODULE_LABELS[m] || m)).join(', ') : '<span class="text-gray-600">None</span>'}</td>
                     <td class="p-4">
-                        <select onchange="changeUserPermission(${u.id}, this.value)" class="bg-[#0c0c0c] border gold-border rounded-lg px-2 py-1 text-xs text-gray-200 focus:outline-none">
+                        <select onchange="changeUserPermission(${Number(u.id)}, this.value)" class="bg-[#0c0c0c] border gold-border rounded-lg px-2 py-1 text-xs text-gray-200 focus:outline-none">
                             <option value="edit" ${u.permission === 'edit' ? 'selected' : ''}>Edit Access</option>
                             <option value="read_only" ${u.permission === 'read_only' ? 'selected' : ''}>Read Only</option>
                         </select>
                     </td>
                     <td class="p-4 text-right whitespace-nowrap">
-                        <button onclick="openUserModal(${u.id})" title="Edit designation & module access" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button>
-                        <button onclick="removeUser(${u.id})" title="Revoke access" class="row-delete-btn fast-transition text-lg leading-none">🗑</button>
+                        <button onclick="openUserModal(${Number(u.id)})" title="Edit designation & module access" class="row-delete-btn fast-transition text-sm leading-none mr-3">✎</button>
+                        <button onclick="removeUser(${Number(u.id)})" title="Revoke access" class="row-delete-btn fast-transition text-lg leading-none">🗑</button>
                     </td>
                 </tr>
             `).join('');
@@ -2260,11 +2274,11 @@
             const grid = document.getElementById('newUserModuleGrid');
             const checked = new Set(Array.isArray(checkedModules) ? checkedModules : []);
             const section = (headKey, label) => `
-                <div class="col-span-2 text-[10px] font-black uppercase tracking-widest text-gray-500 mt-2 first:mt-0">${label}</div>
+                <div class="col-span-2 text-[10px] font-black uppercase tracking-widest text-gray-500 mt-2 first:mt-0">${esc(label)}</div>
                 ${HEAD_MODULES[headKey].filter(([m]) => !OWNER_ONLY_MODULES.has(m)).map(([m, , childLabel]) => `
                     <label class="flex items-center space-x-2 text-xs text-gray-300 bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 cursor-pointer">
-                        <input type="checkbox" class="module-check newUserModuleCheckbox" value="${m}" ${checked.has(m) ? 'checked' : ''}>
-                        <span>${childLabel}</span>
+                        <input type="checkbox" class="module-check newUserModuleCheckbox" value="${esc(m)}" ${checked.has(m) ? 'checked' : ''}>
+                        <span>${esc(childLabel)}</span>
                     </label>
                 `).join('')}
             `;
@@ -2356,7 +2370,7 @@
                     <div id="parallaxThread" class="glass-panel border gold-border p-6 rounded-2xl space-y-4 max-h-[55vh] overflow-y-auto"></div>
                     <div id="parallaxError" class="auth-error"></div>
                     <form id="parallaxForm" onsubmit="submitParallaxQuestion(event)" class="flex gap-3">
-                        <input id="parallaxInput" type="text" autocomplete="off" placeholder="e.g. who hasn't paid fees this month?" class="flex-1 bg-[#0c0c0c] border gold-border rounded-xl p-3 text-xs text-gray-200 focus:outline-none" />
+                        <input id="parallaxInput" type="text" autocomplete="off" placeholder="e.g. how is attendance trending this month?" class="flex-1 bg-[#0c0c0c] border gold-border rounded-xl p-3 text-xs text-gray-200 focus:outline-none" />
                         <button type="submit" id="parallaxSubmitBtn" class="gold-bg hover:opacity-95 text-black font-extrabold px-6 py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Ask</button>
                     </form>
                 </div>
@@ -2530,7 +2544,7 @@
                 return `<div class="glass-panel border gold-border p-6 rounded-2xl shadow-2xl">
                     <div class="flex justify-between items-center mb-5 flex-wrap gap-3">
                         <div><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">${esc(layout.room_number)}</h3><p class="text-xs text-gray-500 mt-1">${esc(layout.exam_date)} · ${layout.rows} × ${layout.columns} · ${assignments.length} students</p></div>
-                        ${canWrite ? `<button onclick="deleteSeatingLayout(${layout.id})" class="text-red-400 border border-red-900/40 bg-[#171010] hover:bg-[#241313] px-3 py-2 rounded-lg text-xs font-bold">Delete</button>` : ''}
+                        ${canWrite ? `<button onclick="deleteSeatingLayout(${Number(layout.id)})" class="text-red-400 border border-red-900/40 bg-[#171010] hover:bg-[#241313] px-3 py-2 rounded-lg text-xs font-bold">Delete</button>` : ''}
                     </div>
                     <div class="grid gap-2" style="grid-template-columns: repeat(${layout.columns}, minmax(80px, 1fr));">${grid}</div>
                 </div>`;
@@ -2659,7 +2673,7 @@
         function timingRowHtml(lectureNumber, timeSlot) {
             return `
                 <div class="flex gap-2 items-center" data-timing-row>
-                    <input type="number" min="1" value="${lectureNumber}" title="Lecture Number" class="w-16 bg-[#070707] border gold-border rounded p-2 text-xs text-white tt-lecture-num">
+                    <input type="number" min="1" value="${Number(lectureNumber) || 1}" title="Lecture Number" class="w-16 bg-[#070707] border gold-border rounded p-2 text-xs text-white tt-lecture-num">
                     <input type="text" value="${esc(timeSlot)}" placeholder="09:00 AM - 10:00 AM" title="Time Slot" class="flex-1 bg-[#070707] border gold-border rounded p-2 text-xs text-white tt-time-slot">
                     <button type="button" onclick="this.closest('[data-timing-row]').remove()" class="text-gray-500 hover:text-red-400 text-sm px-1">✕</button>
                 </div>`;
@@ -2725,7 +2739,7 @@
                     <td class="p-3 font-medium">${esc(s.subject)}</td>
                     <td class="p-3">${esc(s.teacher)}</td>
                     <td class="p-3 text-xs text-gray-400">${esc(s.room)}</td>
-                    ${canWrite ? `<td class="p-3 text-right"><button onclick="openTimetableSlotEdit(${s.id})" title="Edit slot" class="row-delete-btn fast-transition text-sm leading-none">✎</button></td>` : ''}
+                    ${canWrite ? `<td class="p-3 text-right"><button onclick="openTimetableSlotEdit(${Number(s.id)})" title="Edit slot" class="row-delete-btn fast-transition text-sm leading-none">✎</button></td>` : ''}
                 </tr>
             `).join('');
         }
@@ -2810,7 +2824,7 @@
                 body: JSON.stringify(payload),
             });
             if (res.ok) { closeTimetableSlotEdit(); refreshCurrentModule(); }
-            else { alert('Failed to update slot.'); }
+            else { const d = await res.json().catch(() => ({})); alert(apiErrorMessage(d.detail, 'Failed to update slot.')); }
         }
 
         // ----- Record modal -----
@@ -2849,12 +2863,6 @@
                     { id: 'num_lectures', label: 'Number of Lectures', type: 'number', placeholder: '4' },
                     { id: 'lecture_date', label: 'Date', type: 'text', placeholder: '2026-09-15' }
                 ];
-            } else if (moduleName === 'attendance') {
-                fieldsConfig = [
-                    { id: 'student_name', label: 'Student Name', type: 'text', placeholder: 'Priya Patel' },
-                    { id: 'date', label: 'Date', type: 'text', placeholder: '2026-09-01' },
-                    { id: 'status', label: 'Attendance Status', type: 'text', placeholder: 'Present' }
-                ];
             } else if (moduleName === 'invigilation') {
                 fieldsConfig = [
                     { id: 'teacher_name', label: 'Faculty Name', type: 'text', placeholder: 'Prof. Vikram Joshi' },
@@ -2871,8 +2879,8 @@
             }
             fieldsContainer.innerHTML = fieldsConfig.map(f => `
                 <div>
-                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">${f.label}</label>
-                    <input type="${f.type}" id="field_${f.id}" required placeholder="${f.placeholder}" value="${existing && existing[f.id] !== undefined && existing[f.id] !== null ? esc(existing[f.id]) : ''}" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 gold-border-glow focus:outline-none">
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">${esc(f.label)}</label>
+                    <input type="${esc(f.type)}" id="field_${esc(f.id)}" required placeholder="${esc(f.placeholder)}" value="${existing && existing[f.id] !== undefined && existing[f.id] !== null ? esc(existing[f.id]) : ''}" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 gold-border-glow focus:outline-none">
                 </div>
             `).join('');
             window.activeModalModule = moduleName;
@@ -3008,13 +3016,13 @@
                     </div>
                     <div class="whatsapp-card">
                         <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Fee Reminders</h3>
-                        <p class="text-xs text-gray-400 mt-1">Send WhatsApp reminders to parents whose fee due date is within 7 days.</p>
+                        <p class="text-xs text-gray-400 mt-1">Send WhatsApp reminders to parents whose fee due date is within 7 days (in the selected branch).</p>
                         ${canWrite ? `<button onclick="sendFeeReminders()" class="mt-3 gold-bg hover:opacity-95 text-black font-extrabold px-4 py-2 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Send Reminders Now</button>` : '<p class="text-xs text-gray-500 mt-2">You have read-only access.</p>'}
                         <div id="feeReminderResult" class="mt-3 text-xs text-gray-400"></div>
                     </div>
                     <div class="whatsapp-card">
                         <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">📢 Broadcast Noticeboard</h3>
-                        <p class="text-xs text-gray-400 mt-1">Send an emergency alert to every parent in this branch. Leave batch blank to send to everyone.</p>
+                        <p class="text-xs text-gray-400 mt-1">Send an alert to every parent in this branch. Leave batch blank to send to everyone in the branch.</p>
                         <div class="grid md:grid-cols-[1fr_200px] gap-3 mt-3">
                             <textarea id="broadcastMessage" rows="3" placeholder="e.g. Institute will remain closed tomorrow due to heavy rain." class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></textarea>
                             <div class="space-y-2">
@@ -3056,7 +3064,7 @@
             const resultDiv = document.getElementById('broadcastResult');
             const message = (msgEl.value || '').trim();
             if (!message) { resultDiv.textContent = 'Write a message first.'; return; }
-            if (!confirm('Send this WhatsApp broadcast to all matching parents?')) return;
+            if (!confirm('Send this WhatsApp broadcast to all matching parents in this branch?')) return;
             resultDiv.textContent = 'Broadcasting…';
             try {
                 const res = await authFetch('/api/whatsapp/broadcast', {
@@ -3117,7 +3125,7 @@
                             <div class="text-[11px] uppercase tracking-widest text-gray-500 font-bold">
                                 ${esc(new Date(e.created_at).toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'short' }))}
                             </div>
-                            <button onclick="deleteJournalEntry(${e.id})" title="Delete entry" class="row-delete-btn text-lg leading-none">🗑</button>
+                            <button onclick="deleteJournalEntry(${Number(e.id)})" title="Delete entry" class="row-delete-btn text-lg leading-none">🗑</button>
                         </div>
                         <div class="mt-4 journal-entry-gold whitespace-pre-wrap">${esc(e.content)}</div>
                         <div class="mt-3 text-[10px] uppercase tracking-widest text-gray-600">— ${esc(e.author_name || 'Director')}</div>
@@ -3163,6 +3171,8 @@
         // ===== Audit History =====
         const AUDIT_ACTION_LABELS = {
             CREATE_BRANCH: 'created a branch',
+            UPDATE_BRANCH: 'renamed a branch',
+            DELETE_BRANCH: 'deleted a branch',
             UPDATE_INSTITUTE: 'renamed the institute',
             CREATE_USER: 'added a staff user',
             UPDATE_USER: 'updated a staff user',
@@ -3188,6 +3198,10 @@
             UPDATE_INQUIRY: 'updated an inquiry',
             DELETE_INQUIRY: 'deleted an inquiry',
             PASSWORD_CHECK: 'password re-verification',
+            CREATE_RECORD: 'created a record',
+            UPDATE_RECORD: 'updated a record',
+            DELETE_RECORD: 'deleted a record',
+            BULK_IMPORT: 'bulk-imported records',
         };
 
         function describeAudit(row) {
@@ -3308,7 +3322,7 @@
                         <td class="p-3 text-xs text-gray-400">${esc(r.source || '')}</td>
                         <td class="p-3"><span class="perm-badge perm-readonly">${esc(r.status || 'New')}</span></td>
                         <td class="p-3 text-xs">${esc(r.follow_up_date || '')}</td>
-                        ${canWrite ? `<td class="p-3 text-right"><button onclick="deleteInquiry(${r.id})" class="row-delete-btn text-lg leading-none">🗑</button></td>` : ''}
+                        ${canWrite ? `<td class="p-3 text-right"><button onclick="deleteInquiry(${Number(r.id)})" class="row-delete-btn text-lg leading-none">🗑</button></td>` : ''}
                     </tr>
                 `).join('');
             } catch (err) {
@@ -3318,12 +3332,11 @@
 
         function openInquiryModal() {
             const name = prompt('Prospect name:');
-            if (!name) return;
+            if (!name || !name.trim()) return;
             const phone = prompt('Phone (with country code, optional):') || '';
             const interested_in = prompt('Interested in (e.g. JEE 2026, NEET):') || '';
             const source = prompt('Source (Walk-in / Referral / Ad / Other):') || 'Walk-in';
             const follow_up_date = prompt('Follow-up date (YYYY-MM-DD, optional):') || '';
-            if (!name.trim()) return;
             authFetch(`/api/inquiries/${currentBranchId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -3369,18 +3382,12 @@
             }
         };
 
-        console.log('I.B.E.X. fully loaded – Journal + Audit History under Management.');
+        console.log('I.B.E.X. fully loaded – hardened build.');
     </script>
 
     <!-- Embedded exam results/history scripts -->
     <script>
         (() => {
-          const HEAD = 'examination';
-          const MODULES = { results: 'Results', history: 'History' };
-          let examRoot = null;
-          let editingResult = null;
-          let editingHistory = null;
-
           const escExam = (v) => {
             if (typeof esc === 'function') return esc(v ?? '');
             return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -3401,13 +3408,13 @@
           const contentHost = () => document.querySelector('main') || document.querySelector('#mainContent') || document.querySelector('#content') || document.body;
 
           function header(title, subtitle='') {
-            return `<div class="mb-6 flex items-start justify-between gap-4"><div><h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">${title}</h2><p class="text-sm text-gray-500 mt-2">${subtitle}</p></div></div>`;
+            return `<div class="mb-6 flex items-start justify-between gap-4"><div><h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">${escExam(title)}</h2><p class="text-sm text-gray-500 mt-2">${escExam(subtitle)}</p></div></div>`;
           }
           function card(inner) { return `<div class="bg-[#0b0b0b] border border-[#29230f] rounded-2xl p-5 shadow-2xl">${inner}</div>`; }
-          function field(id,label,type='text',placeholder='') { return `<label class="block"><span class="block text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">${label}</span><input id="${id}" type="${type}" placeholder="${placeholder}" class="w-full bg-[#050505] border border-gray-800 rounded-xl px-3 py-3 text-sm text-gray-200 outline-none focus:border-yellow-700"></label>`; }
+          function field(id,label,type='text',placeholder='') { return `<label class="block"><span class="block text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-2">${escExam(label)}</span><input id="${escExam(id)}" type="${escExam(type)}" placeholder="${escExam(placeholder)}" class="w-full bg-[#050505] border border-gray-800 rounded-xl px-3 py-3 text-sm text-gray-200 outline-none focus:border-yellow-700"></label>`; }
 
           window.renderResults = async function() {
-            const host=contentHost(); examRoot=document.createElement('div'); examRoot.id='examUpgradeRoot';
+            const host=contentHost(); const examRoot=document.createElement('div'); examRoot.id='examUpgradeRoot';
             host.innerHTML=''; host.appendChild(examRoot);
             examRoot.innerHTML = header('Results','Enter the paper details, then record marks for every student in the selected batch.') + card(`
               <div class="grid md:grid-cols-5 gap-3">
@@ -3434,13 +3441,13 @@
               window.__examResultMeta=meta; window.__examStudents=students.students||[];
               document.getElementById('erMeta').classList.remove('hidden');
               document.getElementById('erMeta').innerHTML=`<div><b class="text-gray-500">Batch</b><div>${escExam(meta.batch)}</div></div><div><b class="text-gray-500">Subject(s)</b><div>${escExam(meta.subjects)}</div></div><div><b class="text-gray-500">Topic(s)</b><div>${escExam(meta.topics)}</div></div><div><b class="text-gray-500">Exam date</b><div>${escExam(meta.date)}</div></div>`;
-              document.getElementById('erTable').innerHTML=`<table id="erStudentTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Student</th><th class="p-3">Roll Number</th><th class="p-3">Marks / ${overall}</th><th class="p-3">Action</th></tr></thead><tbody>${(students.students||[]).map(s=>`<tr data-student="${s.id}" class="border-b border-gray-950"><td class="p-3 text-gray-200">${escExam(s.name)}</td><td class="p-3 text-gray-500">${escExam(s.roll_number)}</td><td class="p-3"><input data-mark-for="${s.id}" type="number" min="0" max="${overall}" step="0.01" class="w-32 bg-[#050505] border border-gray-800 rounded-lg px-3 py-2" placeholder="Marks"></td><td class="p-3"><button onclick="saveExamStudent(${s.id})" class="text-yellow-600 font-bold text-xs">SAVE</button></td></tr>`).join('')}</tbody></table>`;
+              document.getElementById('erTable').innerHTML=`<table id="erStudentTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Student</th><th class="p-3">Roll Number</th><th class="p-3">Marks / ${overall}</th><th class="p-3">Action</th></tr></thead><tbody>${(students.students||[]).map(s=>`<tr data-student="${Number(s.id)}" class="border-b border-gray-950"><td class="p-3 text-gray-200">${escExam(s.name)}</td><td class="p-3 text-gray-500">${escExam(s.roll_number)}</td><td class="p-3"><input data-mark-for="${Number(s.id)}" type="number" min="0" max="${overall}" step="0.01" class="w-32 bg-[#050505] border border-gray-800 rounded-lg px-3 py-2" placeholder="Marks"></td><td class="p-3"><button onclick="saveExamStudent(${Number(s.id)})" class="text-yellow-600 font-bold text-xs">SAVE</button></td></tr>`).join('')}</tbody></table>`;
             } catch(e) { alert(e.message); }
           }
           window.saveExamStudent=async(id)=>{ try { const s=(window.__examStudents||[]).find(x=>x.id===id), m=document.querySelector(`[data-mark-for="${id}"]`).value; if(m==='') throw new Error('Enter marks first.'); const meta=window.__examResultMeta; await api('/api/exam/results',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:Number(branchId()),batch_name:meta.batch,subjects:meta.subjects,topics:meta.topics,exam_date:meta.date,overall_marks:meta.overall,student_id:id,student_name:s.name,roll_number:s.roll_number,marks:Number(m)})}); alert('Result saved.'); await loadExistingResultGroups(); } catch(e){ alert(e.message); } };
 
           async function loadExistingResultGroups(){
-            try { const rows=await api(`/api/exam/results/${encodeURIComponent(branchId())}`); window.__examResultRows=rows; const host=document.getElementById('erTable'); if(!host) return; if(!rows.length) return; host.insertAdjacentHTML('beforeend',`<div class="mt-8"><div class="flex justify-between items-center mb-3"><h3 class="font-bold text-gray-300">Saved Records</h3><button onclick="pdfResults()" class="text-xs text-yellow-600 font-bold">DOWNLOAD PDF</button></div><div class="overflow-x-auto"><table id="erSavedTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Batch</th><th class="p-3">Subject(s)</th><th class="p-3">Topic(s)</th><th class="p-3">Date</th><th class="p-3">Student</th><th class="p-3">Marks</th><th class="p-3">Actions</th></tr></thead><tbody>${rows.map(r=>`<tr class="border-b border-gray-950"><td class="p-3">${escExam(r.batch_name)}</td><td class="p-3">${escExam(r.subjects)}</td><td class="p-3">${escExam(r.topics)}</td><td class="p-3">${escExam(r.exam_date)}</td><td class="p-3">${escExam(r.student_name)}</td><td class="p-3">${r.marks ?? '—'} / ${r.overall_marks}</td><td class="p-3 whitespace-nowrap"><button onclick="editExamResult(${r.id})" class="text-yellow-600 mr-3 text-xs font-bold">EDIT</button><button onclick="deleteExamResult(${r.id})" class="text-red-500 text-xs font-bold">DELETE</button></td></tr>`).join('')}</tbody></table></div></div>`); } catch(e) { console.error(e); }
+            try { const rows=await api(`/api/exam/results/${encodeURIComponent(branchId())}`); window.__examResultRows=rows; const host=document.getElementById('erTable'); if(!host) return; if(!rows.length) return; host.insertAdjacentHTML('beforeend',`<div class="mt-8"><div class="flex justify-between items-center mb-3"><h3 class="font-bold text-gray-300">Saved Records</h3><button onclick="pdfResults()" class="text-xs text-yellow-600 font-bold">DOWNLOAD PDF</button></div><div class="overflow-x-auto"><table id="erSavedTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Batch</th><th class="p-3">Subject(s)</th><th class="p-3">Topic(s)</th><th class="p-3">Date</th><th class="p-3">Student</th><th class="p-3">Marks</th><th class="p-3">Actions</th></tr></thead><tbody>${rows.map(r=>`<tr class="border-b border-gray-950"><td class="p-3">${escExam(r.batch_name)}</td><td class="p-3">${escExam(r.subjects)}</td><td class="p-3">${escExam(r.topics)}</td><td class="p-3">${escExam(r.exam_date)}</td><td class="p-3">${escExam(r.student_name)}</td><td class="p-3">${r.marks ?? '—'} / ${r.overall_marks}</td><td class="p-3 whitespace-nowrap"><button onclick="editExamResult(${Number(r.id)})" class="text-yellow-600 mr-3 text-xs font-bold">EDIT</button><button onclick="deleteExamResult(${Number(r.id)})" class="text-red-500 text-xs font-bold">DELETE</button></td></tr>`).join('')}</tbody></table></div></div>`); } catch(e) { console.error(e); }
           }
           window.deleteExamResult=async(id)=>{if(!confirm('Delete this result record?'))return;try{await api(`/api/exam/results/${id}`,{method:'DELETE'});await renderResults();}catch(e){alert(e.message)}};
           window.editExamResult=async(id)=>{const r=(window.__examResultRows||[]).find(x=>x.id===id);if(!r)return;document.getElementById('erBatch').value=r.batch_name;document.getElementById('erSubjects').value=r.subjects;document.getElementById('erTopics').value=r.topics;document.getElementById('erDate').value=r.exam_date;document.getElementById('erOverall').value=r.overall_marks;await loadResultsStudents();const inp=document.querySelector(`[data-mark-for="${r.student_id}"]`);if(inp)inp.value=r.marks??'';window.__examEditingId=id;document.getElementById('erLoad').textContent='UPDATE STUDENT';document.getElementById('erLoad').onclick=async()=>{try{const s=(window.__examStudents||[]).find(x=>x.id===r.student_id),m=Number(document.querySelector(`[data-mark-for="${r.student_id}"]`).value),meta=window.__examResultMeta;await api(`/api/exam/results/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch_id:Number(branchId()),batch_name:meta.batch,subjects:meta.subjects,topics:meta.topics,exam_date:meta.date,overall_marks:Number(meta.overall),student_id:r.student_id,student_name:s.name,roll_number:s.roll_number,marks:m})});await renderResults();}catch(e){alert(e.message)}}};
@@ -3499,9 +3506,9 @@
           }
           window.pdfResults = pdfResults;
 
-          window.renderHistory = async function(){const host=contentHost();examRoot=document.createElement('div');examRoot.id='examUpgradeRoot';host.innerHTML='';host.appendChild(examRoot);examRoot.innerHTML=header('History','Keep a clean record of every examination conducted.')+card(`<div class="grid md:grid-cols-4 gap-3">${field('ehSubject','Subject')}${field('ehTopic','Topic')}${field('ehBatch','Batch name')}${field('ehDate','Exam date','date')}</div><div class="mt-4 flex gap-2"><button id="ehSave" class="px-4 py-2 rounded-xl bg-yellow-700/20 border border-yellow-800 text-yellow-500 font-bold text-xs uppercase tracking-widest">Save Record</button><button onclick="pdfHistory()" class="px-4 py-2 rounded-xl border border-gray-800 text-gray-300 font-bold text-xs uppercase tracking-widest">Download PDF</button></div><div id="ehTable" class="mt-6 overflow-x-auto"></div>`);document.getElementById('ehSave').onclick=saveHistory;await loadHistory();}
+          window.renderHistory = async function(){const host=contentHost();const examRoot=document.createElement('div');examRoot.id='examUpgradeRoot';host.innerHTML='';host.appendChild(examRoot);examRoot.innerHTML=header('History','Keep a clean record of every examination conducted.')+card(`<div class="grid md:grid-cols-4 gap-3">${field('ehSubject','Subject')}${field('ehTopic','Topic')}${field('ehBatch','Batch name')}${field('ehDate','Exam date','date')}</div><div class="mt-4 flex gap-2"><button id="ehSave" class="px-4 py-2 rounded-xl bg-yellow-700/20 border border-yellow-800 text-yellow-500 font-bold text-xs uppercase tracking-widest">Save Record</button><button onclick="pdfHistory()" class="px-4 py-2 rounded-xl border border-gray-800 text-gray-300 font-bold text-xs uppercase tracking-widest">Download PDF</button></div><div id="ehTable" class="mt-6 overflow-x-auto"></div>`);document.getElementById('ehSave').onclick=saveHistory;await loadHistory();}
           async function saveHistory(){try{const p={branch_id:Number(branchId()),subject:document.getElementById('ehSubject').value.trim(),topic:document.getElementById('ehTopic').value.trim(),batch_name:document.getElementById('ehBatch').value.trim(),exam_date:document.getElementById('ehDate').value};if(!p.subject||!p.topic||!p.batch_name||!p.exam_date)throw new Error('Fill all History fields.');if(window.__historyEditingId)await api(`/api/exam/history/${window.__historyEditingId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});else await api('/api/exam/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)});window.__historyEditingId=null;await loadHistory();}catch(e){alert(e.message)}}
-          async function loadHistory(){try{const rows=await api(`/api/exam/history/${encodeURIComponent(branchId())}`);window.__examHistoryRows=rows;document.getElementById('ehTable').innerHTML=`<table id="ehSavedTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Subject</th><th class="p-3">Topic</th><th class="p-3">Batch</th><th class="p-3">Exam date</th><th class="p-3">Actions</th></tr></thead><tbody>${rows.map(r=>`<tr class="border-b border-gray-950"><td class="p-3">${escExam(r.subject)}</td><td class="p-3">${escExam(r.topic)}</td><td class="p-3">${escExam(r.batch_name)}</td><td class="p-3">${escExam(r.exam_date)}</td><td class="p-3"><button onclick="editExamHistory(${r.id})" class="text-yellow-600 mr-3 text-xs font-bold">EDIT</button><button onclick="deleteExamHistory(${r.id})" class="text-red-500 text-xs font-bold">DELETE</button></td></tr>`).join('')}</tbody></table>`;}catch(e){console.error(e)}}
+          async function loadHistory(){try{const rows=await api(`/api/exam/history/${encodeURIComponent(branchId())}`);window.__examHistoryRows=rows;document.getElementById('ehTable').innerHTML=`<table id="ehSavedTable" class="w-full text-sm"><thead><tr class="text-left text-[10px] uppercase tracking-widest text-gray-500 border-b border-gray-900"><th class="p-3">Subject</th><th class="p-3">Topic</th><th class="p-3">Batch</th><th class="p-3">Exam date</th><th class="p-3">Actions</th></tr></thead><tbody>${rows.map(r=>`<tr class="border-b border-gray-950"><td class="p-3">${escExam(r.subject)}</td><td class="p-3">${escExam(r.topic)}</td><td class="p-3">${escExam(r.batch_name)}</td><td class="p-3">${escExam(r.exam_date)}</td><td class="p-3"><button onclick="editExamHistory(${Number(r.id)})" class="text-yellow-600 mr-3 text-xs font-bold">EDIT</button><button onclick="deleteExamHistory(${Number(r.id)})" class="text-red-500 text-xs font-bold">DELETE</button></td></tr>`).join('')}</tbody></table>`;}catch(e){console.error(e)}}
           window.editExamHistory=(id)=>{const r=(window.__examHistoryRows||[]).find(x=>x.id===id);if(!r)return;document.getElementById('ehSubject').value=r.subject;document.getElementById('ehTopic').value=r.topic;document.getElementById('ehBatch').value=r.batch_name;document.getElementById('ehDate').value=r.exam_date;window.__historyEditingId=id;document.getElementById('ehSave').textContent='Update Record';};
           window.deleteExamHistory=async(id)=>{if(!confirm('Delete this history record?'))return;try{await api(`/api/exam/history/${id}`,{method:'DELETE'});await loadHistory()}catch(e){alert(e.message)}};
           window.pdfHistory=()=>{const rows=window.__examHistoryRows||[];if(!rows.length){alert('No History records to download.');return;}const J=window.jspdf;if(!J?.jsPDF){alert('PDF library is unavailable.');return;}const doc=new J.jsPDF('l');const startY=ibexPdfHeader(doc,'Examination History','Every examination conducted, on record');doc.autoTable({startY,head:[['Subject','Topic','Batch','Exam Date']],body:rows.map(r=>[r.subject,r.topic,r.batch_name,r.exam_date]),...IBEX_PDF_TABLE_STYLE});doc.save('exam-history.pdf');};
