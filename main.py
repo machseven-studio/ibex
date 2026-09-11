@@ -15,6 +15,9 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import smtplib
+from email.mime.text import MIMEText
+
 import bcrypt
 import psycopg2
 from psycopg2.extras import DictCursor
