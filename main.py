@@ -6,6 +6,7 @@ import io
 import json
 import os
 import random
+import threading
 import time
 from pathlib import Path
 import secrets
@@ -43,6 +44,7 @@ MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 LOGIN_MAX_ATTEMPTS = 5
 LOGIN_WINDOW_SECONDS = 15 * 60
 _login_attempts: dict[str, list[float]] = defaultdict(list)
+_login_attempts_lock = threading.Lock()
 
 
 def _rate_limit_key(request: "Request", email: str) -> str:
@@ -53,18 +55,21 @@ def _rate_limit_key(request: "Request", email: str) -> str:
 def check_login_rate_limit(request: "Request", email: str):
     key = _rate_limit_key(request, email)
     now = time.time()
-    attempts = [t for t in _login_attempts[key] if now - t < LOGIN_WINDOW_SECONDS]
-    _login_attempts[key] = attempts
-    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
-        raise HTTPException(status_code=429, detail="Too many login attempts. Please wait 15 minutes and try again.")
+    with _login_attempts_lock:
+        attempts = [t for t in _login_attempts[key] if now - t < LOGIN_WINDOW_SECONDS]
+        _login_attempts[key] = attempts
+        if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="Too many login attempts. Please wait 15 minutes and try again.")
 
 
 def record_failed_login(request: "Request", email: str):
-    _login_attempts[_rate_limit_key(request, email)].append(time.time())
+    with _login_attempts_lock:
+        _login_attempts[_rate_limit_key(request, email)].append(time.time())
 
 
 def clear_login_attempts(request: "Request", email: str):
-    _login_attempts.pop(_rate_limit_key(request, email), None)
+    with _login_attempts_lock:
+        _login_attempts.pop(_rate_limit_key(request, email), None)
 
 
 def set_session_cookie(response: "Response", token: str):
@@ -113,6 +118,10 @@ WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 
+# Modules whose access is gated behind a server-enforced password re-verification.
+GATED_MODULES = {"fees", "users", "journal", "audit_history"}
+GATE_TTL_SECONDS = 15 * 60  # sliding window, refreshed on every successful use
+
 
 # ---------------------------------------------------------------------------
 # Database setup
@@ -135,6 +144,7 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS branches (id SERIAL PRIMARY KEY, institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE, tenant_id INTEGER NOT NULL, name TEXT NOT NULL, UNIQUE(institute_id, name))""",
         """CREATE TABLE IF NOT EXISTS staff_users (id SERIAL PRIMARY KEY, institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE, full_name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, password_salt TEXT NOT NULL, permission TEXT NOT NULL DEFAULT 'read_only', designation TEXT, module_access TEXT, created_at TIMESTAMPTZ NOT NULL)""",
         """CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE, staff_user_id INTEGER REFERENCES staff_users(id) ON DELETE CASCADE, expires_at TIMESTAMPTZ NOT NULL)""",
+        """CREATE TABLE IF NOT EXISTS module_gate_tokens (token TEXT PRIMARY KEY, institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE, staff_user_id INTEGER, module TEXT NOT NULL, expires_at TIMESTAMPTZ NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW())""",
         """CREATE TABLE IF NOT EXISTS students (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, name TEXT, email TEXT, batch TEXT, status TEXT, document TEXT, roll_number TEXT, parent_contact TEXT)""",
         """CREATE TABLE IF NOT EXISTS teachers (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, name TEXT, subject TEXT, department TEXT, document TEXT, contact_number TEXT)""",
         """CREATE TABLE IF NOT EXISTS classrooms (id SERIAL PRIMARY KEY, branch_id INTEGER REFERENCES branches(id) ON DELETE CASCADE, room_no TEXT, capacity INTEGER, building TEXT, document TEXT)""",
@@ -236,6 +246,7 @@ def init_db():
         cur.execute(stmt)
     for stmt in [
         "CREATE INDEX IF NOT EXISTS idx_branches_institute ON branches(institute_id)",
+        "CREATE INDEX IF NOT EXISTS idx_branches_tenant ON branches(tenant_id)",
         "CREATE INDEX IF NOT EXISTS idx_students_branch ON students(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_teachers_branch ON teachers(branch_id)",
         "CREATE INDEX IF NOT EXISTS idx_classrooms_branch ON classrooms(branch_id)",
@@ -247,6 +258,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC)",
         "CREATE INDEX IF NOT EXISTS idx_journal_institute_created ON journal_entries(institute_id, created_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_inquiries_branch_created ON inquiries(branch_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_gate_tokens_expires ON module_gate_tokens(expires_at)",
     ]:
         cur.execute(stmt)
     conn.commit()
@@ -283,9 +296,14 @@ def verify_password(password: str, password_hash: str, legacy_salt: str | None) 
     return False, None
 
 
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now — replaces deprecated datetime.utcnow()."""
+    return datetime.now(timezone.utc)
+
+
 def create_session(institute_id: int, staff_user_id: int = None) -> str:
     token = secrets.token_urlsafe(32)
-    expires_at = (datetime.utcnow() + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
+    expires_at = (_utcnow() + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
     conn = get_conn(); cur = conn.cursor()
     cur.execute(
         "INSERT INTO sessions (token, institute_id, staff_user_id, expires_at) VALUES (%s, %s, %s, %s)",
@@ -299,7 +317,7 @@ def create_session(institute_id: int, staff_user_id: int = None) -> str:
 def touch_session(token: str):
     """Roll the session expiry forward - keeps users logged in across browser restarts."""
     conn = get_conn(); cur = conn.cursor()
-    new_expiry = (datetime.utcnow() + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
+    new_expiry = (_utcnow() + timedelta(days=SESSION_LIFETIME_DAYS)).isoformat()
     cur.execute("UPDATE sessions SET expires_at = %s WHERE token = %s", (new_expiry, token))
     conn.commit(); conn.close()
 
@@ -314,6 +332,54 @@ class CurrentInstitute(BaseModel):
     permission: str
     designation: str = "Owner"
     allowed_modules: list = ALL_ACCESS_MODULES
+
+
+# --- Module gate tokens (server-enforced password re-verification) ---------
+
+def create_gate_token(institute: CurrentInstitute, module: str) -> str:
+    token = secrets.token_urlsafe(24)
+    expires_at = (_utcnow() + timedelta(seconds=GATE_TTL_SECONDS)).isoformat()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO module_gate_tokens (token, institute_id, staff_user_id, module, expires_at) VALUES (%s, %s, %s, %s, %s)",
+            (token, institute.id, institute.user_id, module, expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return token
+
+
+def consume_gate_token(institute: CurrentInstitute, module: str, token: str | None) -> None:
+    """Raise 403 unless a valid, unexpired gate token exists for this user+module.
+    The token's TTL is refreshed on every successful use (sliding window)."""
+    if not token:
+        raise HTTPException(status_code=403, detail=f"Password re-verification required for {module.replace('_', ' ')}.")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT expires_at FROM module_gate_tokens WHERE token = %s AND institute_id = %s AND module = %s",
+            (token, institute.id, module),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=403, detail="Invalid or expired gate token. Please re-verify.")
+        expires_at = row["expires_at"]
+        if not isinstance(expires_at, datetime):
+            expires_at = datetime.fromisoformat(expires_at)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < _utcnow():
+            raise HTTPException(status_code=403, detail="Gate token expired. Please re-verify.")
+        # Sliding window: extend the TTL on every successful use.
+        new_expiry = (_utcnow() + timedelta(seconds=GATE_TTL_SECONDS)).isoformat()
+        cur.execute("UPDATE module_gate_tokens SET expires_at = %s WHERE token = %s", (new_expiry, token))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def check_module_access(institute: "CurrentInstitute", module: str):
@@ -340,8 +406,9 @@ def get_current_institute(alg_session: str | None = Cookie(default=None, alias=S
     expires_at = session["expires_at"]
     if not isinstance(expires_at, datetime):
         expires_at = datetime.fromisoformat(expires_at)
-    now_utc = datetime.now(timezone.utc) if expires_at.tzinfo else datetime.utcnow()
-    if expires_at < now_utc:
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at < _utcnow():
         cursor.execute("DELETE FROM sessions WHERE token = %s", (token,))
         conn.commit(); conn.close()
         audit_system(session["institute_id"], None, "EXPIRE_SESSION", {"token": "redacted"}, None)
@@ -469,7 +536,7 @@ def signup(req: SignupRequest, response: Response):
         cursor.execute(
             """INSERT INTO institutes (institute_name, full_name, email, password_hash, password_salt, created_at)
                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-            (req.institute_name, req.full_name, req.email.lower(), password_hash, "", datetime.utcnow().isoformat()),
+            (req.institute_name, req.full_name, req.email.lower(), password_hash, "", _utcnow().isoformat()),
         )
         institute_id = cursor.fetchone()[0]
         cursor.execute(
@@ -634,7 +701,10 @@ def verify_password_gate(payload: PasswordVerifyPayload, institute: CurrentInsti
             "status": status,
         },
     )
-    return {"verified": ok}
+    gate_token = None
+    if ok and payload.target_module and payload.target_module in GATED_MODULES:
+        gate_token = create_gate_token(institute, payload.target_module)
+    return {"verified": ok, "gate_token": gate_token, "expires_in_seconds": GATE_TTL_SECONDS}
 
 
 # ---------------------------------------------------------------------------
@@ -651,10 +721,16 @@ def update_institute_name(req: InstituteNameUpdate, institute: CurrentInstitute 
     if not name:
         raise HTTPException(status_code=400, detail="Institute name cannot be empty")
     conn = get_conn()
-    cur = conn.cursor(); cur.execute("SELECT institute_name FROM institutes WHERE id = %s", (institute.id,)); before = cur.fetchone()
-    conn.cursor().execute("UPDATE institutes SET institute_name = %s WHERE id = %s", (name, institute.id))
-    conn.commit(); conn.close()
-    audit_write(institute, None, "UPDATE_INSTITUTE", {"institute_name": before[0] if before else None}, {"institute_name": name})
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT institute_name FROM institutes WHERE id = %s", (institute.id,))
+        row = cur.fetchone()
+        before_name = (row["institute_name"] if row else None)
+        cur.execute("UPDATE institutes SET institute_name = %s WHERE id = %s", (name, institute.id))
+        conn.commit()
+    finally:
+        conn.close()
+    audit_write(institute, None, "UPDATE_INSTITUTE", {"institute_name": before_name}, {"institute_name": name})
     return {"institute_name": name}
 
 
@@ -686,7 +762,11 @@ def _validate_modules(modules: list):
 
 
 @app.get("/api/users")
-def list_staff_users(institute: CurrentInstitute = Depends(require_owner)):
+def list_staff_users(
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "users", x_gate_token)
     try:
         conn = get_conn(); cursor = conn.cursor()
         cursor.execute(
@@ -705,12 +785,19 @@ def list_staff_users(institute: CurrentInstitute = Depends(require_owner)):
             users.append(u)
         conn.close()
         return users
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load users: {e}")
 
 
 @app.post("/api/users")
-def add_staff_user(req: StaffUserCreate, institute: CurrentInstitute = Depends(require_owner)):
+def add_staff_user(
+    req: StaffUserCreate,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "users", x_gate_token)
     if req.permission not in ("edit", "read_only"):
         raise HTTPException(status_code=400, detail="Permission must be 'edit' or 'read_only'")
     if len(req.password) < 8:
@@ -725,7 +812,7 @@ def add_staff_user(req: StaffUserCreate, institute: CurrentInstitute = Depends(r
             """INSERT INTO staff_users (institute_id, full_name, email, password_hash, password_salt, permission, designation, module_access, created_at)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (institute.id, req.full_name, req.email.lower(), password_hash, "", req.permission,
-             req.designation.strip(), json.dumps(req.modules), datetime.utcnow().isoformat()),
+             req.designation.strip(), json.dumps(req.modules), _utcnow().isoformat()),
         )
         user_id = cursor.fetchone()[0]
         conn.commit()
@@ -747,7 +834,13 @@ def verify_staff_ownership(user_id: int, institute_id: int):
 
 
 @app.patch("/api/users/{user_id}")
-def update_staff_permission(user_id: int, req: StaffPermissionUpdate, institute: CurrentInstitute = Depends(require_owner)):
+def update_staff_permission(
+    user_id: int,
+    req: StaffPermissionUpdate,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "users", x_gate_token)
     verify_staff_ownership(user_id, institute.id)
     pre_conn = get_conn(); pre_cur = pre_conn.cursor()
     pre_cur.execute("SELECT permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
@@ -775,7 +868,12 @@ def update_staff_permission(user_id: int, req: StaffPermissionUpdate, institute:
 
 
 @app.delete("/api/users/{user_id}")
-def remove_staff_user(user_id: int, institute: CurrentInstitute = Depends(require_owner)):
+def remove_staff_user(
+    user_id: int,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "users", x_gate_token)
     verify_staff_ownership(user_id, institute.id)
     conn = get_conn(); cursor = conn.cursor()
     cursor.execute("SELECT id, full_name, email, permission, designation, module_access FROM staff_users WHERE id = %s", (user_id,))
@@ -1505,6 +1603,20 @@ def generate_timetable(req: TimetableGenerateRequest, institute: CurrentInstitut
         raise HTTPException(status_code=500, detail=f"Timetable generation failed: {e}")
 
 
+def _safe_int(value, default: int = 0) -> int:
+    """Coerce a value that may be a str (from an HTML form) or None into int."""
+    if value is None:
+        return default
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "":
+            return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "CurrentInstitute"):
     check_module_access(institute, "timetables")
     verify_branch_ownership(req.branch_id, institute.id)
@@ -1543,11 +1655,14 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
         return "Unassigned (no room with sufficient capacity)" if available_rooms else "Unassigned (add a classroom)"
 
     for t_config in req.teachers_config:
-        teacher_name = str(t_config.get('name', '')).strip()
-        subject = str(t_config.get('subject', '')).strip()
-        target_lectures = max(0, int(t_config.get('lectures_per_week', 0)))
-        unavailable = {str(d).strip() for d in t_config.get('unavailable_days', [])}
-        if not teacher_name or target_lectures == 0: continue
+        if not isinstance(t_config, dict):
+            continue
+        teacher_name = str(t_config.get('name', '') or '').strip()
+        subject = str(t_config.get('subject', '') or '').strip()
+        target_lectures = max(0, _safe_int(t_config.get('lectures_per_week', 0), default=0))
+        unavailable = {str(d).strip() for d in (t_config.get('unavailable_days') or [])}
+        if not teacher_name or target_lectures == 0:
+            continue
         assigned_count = 0; used_days = []
         used_lecture_nums_by_day = defaultdict(list)
 
@@ -1615,7 +1730,7 @@ def _generate_timetable_impl(req: "TimetableGenerateRequest", institute: "Curren
     existing_config = cursor.fetchone()
     timings_json = json.dumps([t.dict() for t in req.timings])
     teachers_config_json = json.dumps(req.teachers_config)
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = _utcnow().isoformat()
     if existing_config:
         cursor.execute("UPDATE timetable_configs SET timings_json = %s, teachers_config_json = %s, updated_at = %s WHERE id = %s", (timings_json, teachers_config_json, now_iso, existing_config[0]))
     else:
@@ -1802,7 +1917,7 @@ def _generate_seating_impl(req: "SeatingGenerateRequest", institute: "CurrentIns
         conn.close(); raise HTTPException(status_code=400, detail=f"Only {len(remaining_students)} unassigned student(s) remain for the selected batch(es); {requested_capacity} seats were requested.")
     assignments = _build_seating_layout(remaining_students, req.rows, req.columns)
     cursor.execute("""INSERT INTO exam_seatings (branch_id, exam_date, room_number, rows, columns, assignments_json, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-                   (req.branch_id, req.exam_date, room_number, req.rows, req.columns, json.dumps(assignments), datetime.utcnow().isoformat()))
+                   (req.branch_id, req.exam_date, room_number, req.rows, req.columns, json.dumps(assignments), _utcnow().isoformat()))
     layout_id = cursor.fetchone()[0]
     conn.commit(); conn.close()
     audit_write(institute, req.branch_id, "GENERATE_SEATING", None, {"id": layout_id, "exam_date": req.exam_date, "room_number": room_number, "rows": req.rows, "columns": req.columns, "batches": selected_batches, "assignments": assignments})
@@ -1828,8 +1943,14 @@ class FeeMarkPaidRequest(BaseModel):
 
 
 @app.post("/api/fees/{fee_id}/mark-paid")
-def mark_fee_paid(fee_id: int, req: FeeMarkPaidRequest, institute: CurrentInstitute = Depends(require_write_access)):
+def mark_fee_paid(
+    fee_id: int,
+    req: FeeMarkPaidRequest,
+    institute: CurrentInstitute = Depends(require_write_access),
+    x_gate_token: str | None = Header(default=None),
+):
     check_module_access(institute, "fees")
+    consume_gate_token(institute, "fees", x_gate_token)
     utr = req.utr_reference.strip()
     if not utr:
         raise HTTPException(status_code=400, detail="UTR / Reference No. is required.")
@@ -1886,7 +2007,7 @@ def get_analytics(branch_id: int, institute: CurrentInstitute = Depends(get_curr
     except Exception:
         conn.rollback(); pending_amount, pending_count = 0, 0
 
-    now_ist = datetime.now(timezone.utc) + IST_OFFSET
+    now_ist = _utcnow() + IST_OFFSET
     today = now_ist.date(); week_start = today - timedelta(days=6)
     att_counts = {}
     rows = all_rows(f"SELECT status, COUNT(*) FROM attendance WHERE {scope} AND date >= %s AND date <= %s GROUP BY status", (scope_param, week_start.isoformat(), today.isoformat()))
@@ -1942,8 +2063,8 @@ def detect_slumps(branch_id: int, days: int = 30, institute: CurrentInstitute = 
     conn = get_conn(); cur = conn.cursor()
     scope_att = "branch_id IN (SELECT id FROM branches WHERE tenant_id = %s)" if branch_id == 0 else "branch_id = %s"
     scope_param = institute.id if branch_id == 0 else branch_id
-    cutoff = (datetime.utcnow() + IST_OFFSET - timedelta(days=days)).date().isoformat()
-    prev_cutoff = (datetime.utcnow() + IST_OFFSET - timedelta(days=days * 2)).date().isoformat()
+    cutoff = (_utcnow() + IST_OFFSET - timedelta(days=days)).date().isoformat()
+    prev_cutoff = (_utcnow() + IST_OFFSET - timedelta(days=days * 2)).date().isoformat()
     slumps = []
     try:
         cur.execute(
@@ -2016,7 +2137,9 @@ def list_audit_log(
     limit: int = 200,
     offset: int = 0,
     institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
 ):
+    consume_gate_token(institute, "audit_history", x_gate_token)
     limit = max(1, min(limit, 500)); offset = max(0, offset)
     conn = get_conn()
     try:
@@ -2073,7 +2196,13 @@ class JournalCreate(BaseModel):
 
 
 @app.get("/api/journal")
-def list_journal(branch_id: int | None = None, limit: int = 200, institute: CurrentInstitute = Depends(require_owner)):
+def list_journal(
+    branch_id: int | None = None,
+    limit: int = 200,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "journal", x_gate_token)
     limit = max(1, min(limit, 500))
     conn = get_conn()
     try:
@@ -2104,7 +2233,12 @@ def list_journal(branch_id: int | None = None, limit: int = 200, institute: Curr
 
 
 @app.post("/api/journal")
-def create_journal(req: JournalCreate, institute: CurrentInstitute = Depends(require_owner)):
+def create_journal(
+    req: JournalCreate,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "journal", x_gate_token)
     content = (req.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="Journal entry cannot be empty.")
@@ -2125,7 +2259,12 @@ def create_journal(req: JournalCreate, institute: CurrentInstitute = Depends(req
 
 
 @app.delete("/api/journal/{entry_id}")
-def delete_journal(entry_id: int, institute: CurrentInstitute = Depends(require_owner)):
+def delete_journal(
+    entry_id: int,
+    institute: CurrentInstitute = Depends(require_owner),
+    x_gate_token: str | None = Header(default=None),
+):
+    consume_gate_token(institute, "journal", x_gate_token)
     conn = get_conn()
     try:
         cur = conn.cursor()
@@ -2281,7 +2420,7 @@ def _time_ranges_overlap(a: str, b: str) -> bool:
 def get_dashboard(branch_id: int, institute: CurrentInstitute = Depends(get_current_institute)):
     verify_branch_read_access(branch_id, institute.id)
     conn = get_conn(); cursor = conn.cursor()
-    now_ist = datetime.utcnow() + IST_OFFSET
+    now_ist = _utcnow() + IST_OFFSET
     today = now_ist.date(); week_start = today - timedelta(days=6)
     attendance_week = []
     if institute.is_owner or "attendance" in institute.allowed_modules:
@@ -2519,7 +2658,8 @@ def _exam_branch_check(institute, branch_id: int, module: str):
     conn = get_conn()
     try:
         cur = conn.cursor()
-        cur.execute("SELECT id FROM branches WHERE id=%s AND institute_id=%s", (branch_id, institute.id))
+        # Canonical ownership column is `tenant_id`; `institute_id` is legacy.
+        cur.execute("SELECT id FROM branches WHERE id=%s AND tenant_id=%s", (branch_id, institute.id))
         if not cur.fetchone():
             raise HTTPException(status_code=403, detail="Branch access denied")
     finally:
