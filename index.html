@@ -666,6 +666,8 @@
         let myDesignation = 'Owner';
         let myAllowedModules = [];
         let bulkImportModule = null;
+        // One-shot module gate tokens (per sensitive module), refreshed by the server on each use.
+        window.__moduleGateTokens = window.__moduleGateTokens || {};
 
         // ============================================================
         // NAVIGATION TAXONOMY — 4 parent heads
@@ -847,19 +849,31 @@
         async function handleLogout() {
             try { await authFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
             currentBranchId = null;
+            window.__moduleGateTokens = {};
             document.getElementById('appContainer').classList.add('hidden');
             document.getElementById('authOverlay').classList.remove('hidden');
             document.getElementById('loginForm').classList.remove('hidden');
             document.getElementById('signupForm').classList.add('hidden');
         }
 
+        // --- authFetch: attaches the module gate token for gated modules ---
+        const GATED_MODULES_CLIENT = new Set(['fees', 'users', 'journal', 'audit_history']);
         async function authFetch(url, options = {}) {
-            const res = await fetch(url, options);
+            const opts = { ...options };
+            opts.headers = { ...(opts.headers || {}) };
+            if (GATED_MODULES_CLIENT.has(currentModule) && window.__moduleGateTokens[currentModule]) {
+                opts.headers['X-Gate-Token'] = window.__moduleGateTokens[currentModule];
+            }
+            const res = await fetch(url, opts);
             if (res.status === 401) {
                 document.getElementById('appContainer').classList.add('hidden');
                 document.getElementById('authOverlay').classList.remove('hidden');
                 document.getElementById('loginError').textContent = 'Session expired. Please log in again.';
                 throw new Error('Session expired');
+            }
+            // Clear stale gate tokens so the next entry re-prompts.
+            if (res.status === 403 && GATED_MODULES_CLIENT.has(currentModule)) {
+                delete window.__moduleGateTokens[currentModule];
             }
             return res;
         }
@@ -1093,6 +1107,10 @@
                     errEl.textContent = 'Incorrect password. This attempt has been logged.';
                     return;
                 }
+                // Stash the one-shot gate token so sensitive API calls include it.
+                if (data.gate_token) {
+                    window.__moduleGateTokens[__pendingGateAction.moduleKey] = data.gate_token;
+                }
                 const onSuccess = __pendingGateAction.onSuccess;
                 closePasswordGate();
                 if (typeof onSuccess === 'function') onSuccess();
@@ -1289,7 +1307,7 @@
                 const preview = text.replace(/\s+/g, ' ').trim().slice(0, 180);
                 throw new Error(`${context} returned HTTP ${res.status}: ${preview || 'empty response'}`);
             }
-            if (!res.ok) throw new Error((data && data.detail) || `${context} failed (HTTP ${res.status}).`);
+            if (!res.ok) throw new Error(apiErrorMessage(data && data.detail, `${context} failed (HTTP ${res.status}).`));
             return data;
         }
 
@@ -2209,10 +2227,10 @@
                 return;
             }
             if (!res.ok) {
-                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="p-8 text-center text-red-400">${esc(apiErrorMessage(parsed.detail, 'Failed to load users.'))}</td></tr>`;
+                document.getElementById('usersTableBody').innerHTML = `<tr><td colspan="6" class="p-8 text-center text-red-400">${esc(apiErrorMessage(parsed && parsed.detail, 'Failed to load users.'))}</td></tr>`;
                 return;
             }
-            usersCache = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.users) ? parsed.users : []);
+            usersCache = Array.isArray(parsed) ? parsed : (Array.isArray(parsed && parsed.users) ? parsed.users : []);
             const tbody = document.getElementById('usersTableBody');
             if (usersCache.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="6" class="p-8 text-center text-gray-500">No staff users yet. Click '+ Add User' to grant access.</td></tr>`;
@@ -2951,7 +2969,7 @@
             const tickColor = '#9ca3af';
             const attendanceCtx = document.getElementById('centralAttendanceChart');
             if (attendanceCtx && window.Chart) {
-                window.__centralAnalyticsCharts.push(new window.IBEXChart(attendanceCtx, {
+                window.__centralAnalyticsCharts.push(window.IBEXChart(attendanceCtx, {
                     type: 'line',
                     data: { labels: trend.map(t => t.label), datasets: [{ label: 'Present %', data: trend.map(t => t.pct), borderColor: goldLine, backgroundColor: 'rgba(212,175,55,0.15)', tension: 0.35, fill: true }] },
                     options: { plugins: { legend: { labels: { color: tickColor } } }, scales: { x: { ticks: { color: tickColor }, grid: { color: gridColor } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } } }
@@ -2959,7 +2977,7 @@
             }
             const batchCtx = document.getElementById('centralBatchChart');
             if (batchCtx && window.Chart) {
-                window.__centralAnalyticsCharts.push(new window.IBEXChart(batchCtx, {
+                window.__centralAnalyticsCharts.push(window.IBEXChart(batchCtx, {
                     type: 'bar',
                     data: { labels: batches.map(b => b.batch), datasets: [{ label: 'Attendance %', data: batches.map(b => b.pct), backgroundColor: goldLine }] },
                     options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor }, min: 0, max: 100 } } }
@@ -2967,7 +2985,7 @@
             }
             const revenueCtx = document.getElementById('centralRevenueChart');
             if (revenueCtx && window.Chart) {
-                window.__centralAnalyticsCharts.push(new window.IBEXChart(revenueCtx, {
+                window.__centralAnalyticsCharts.push(window.IBEXChart(revenueCtx, {
                     type: 'bar',
                     data: { labels: revenue.map(r => r.date), datasets: [{ label: 'Revenue (₹)', data: revenue.map(r => r.amount), backgroundColor: 'rgba(212,175,55,0.65)' }] },
                     options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { color: tickColor }, grid: { display: false } }, y: { ticks: { color: tickColor }, grid: { color: gridColor } } } }
@@ -3326,23 +3344,6 @@
             if (!res.ok) { alert('Failed to delete.'); return; }
             await loadInquiries();
         }
-
-        // ===== Exam Results & History (global) =====
-        window.renderResults = async function() {
-            if (typeof renderResults === 'function') {
-                await renderResults();
-            } else {
-                document.getElementById('mainContent').innerHTML = '<div class="glass-panel border gold-border p-10 rounded-2xl text-center text-gray-500">Results module loading…</div>';
-            }
-        };
-
-        window.renderHistory = async function() {
-            if (typeof renderHistory === 'function') {
-                await renderHistory();
-            } else {
-                document.getElementById('mainContent').innerHTML = '<div class="glass-panel border gold-border p-10 rounded-2xl text-center text-gray-500">History module loading…</div>';
-            }
-        };
 
         // ---- Delete Parallax history ----
         const oldParallaxThread = renderParallaxThread;
