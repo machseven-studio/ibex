@@ -11,6 +11,26 @@ services:
         fromDatabase:
           name: ibex-postgres
           property: connectionString
+      # --- App environment -------------------------------------------------
+      # Set to "development" locally so the session cookie's `secure` flag is
+      # disabled and login works over plain HTTP. On Render this should stay
+      # "production" (Render terminates TLS for you).
+      - key: ENV
+        value: production
+      # --- Parallax (Gemini) ----------------------------------------------
+      # `sync: false` tells Render to prompt for the value in the dashboard
+      # instead of committing it to the repo.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      # --- WhatsApp Cloud API ---------------------------------------------
+      - key: WHATSAPP_API_URL
+        sync: false
+      - key: WHATSAPP_API_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
 
 databases:
   - name: ibex-postgres
