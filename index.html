@@ -293,6 +293,70 @@
             -webkit-text-fill-color: transparent;
             filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4));
         }
+
+        /* ---- Unified module header action buttons ---- */
+        .ibex-action-btn {
+            height: 42px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 1.25rem;
+            border-radius: 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            white-space: nowrap;
+            box-shadow: 0 10px 25px -10px rgba(0,0,0,0.6);
+            transition: background 0.15s ease, opacity 0.15s ease;
+        }
+        .ibex-action-btn.primary { background: linear-gradient(135deg, #EACD6E, #AA771C); color: #000; }
+        .ibex-action-btn.primary:hover { opacity: 0.95; }
+        .ibex-action-btn.secondary { background: #141414; border: 1px solid rgba(212,175,55,0.28); }
+        .ibex-action-btn.secondary:hover { background: #1f1f1f; }
+        .ibex-action-btn.secondary span {
+            background: linear-gradient(135deg, #F4E5A1 0%, #E8C767 20%, #BF953F 45%, #8a6a22 60%, #E8C767 80%, #F4E5A1 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .ibex-action-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+
+        /* ---- Home icon beside Enterprise Modules ---- */
+        .sidebar-home-row { display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem 0.5rem 1.5rem; }
+        .sidebar-home-btn {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 26px; height: 26px; border-radius: 8px;
+            border: 1px solid rgba(212,175,55,0.28); color: #E8C767;
+            background: #121212; font-size: 13px; flex-shrink: 0;
+            transition: background 0.15s ease, color 0.15s ease;
+        }
+        .sidebar-home-btn:hover { background: #1f1f1f; color: #F4E5A1; }
+
+        /* ---- Sidebar footer identity panel (moved from header) ---- */
+        .sidebar-user-panel { border-top: 1px solid rgba(212,175,55,0.2); margin-top: 0.75rem; padding-top: 0.75rem; }
+
+        /* ---- Password re-verification gate modal ---- */
+        #passwordGateModal .auth-error { min-height: 1rem; }
+
+        /* ---- Mobile loading overlay ---- */
+        #mobileLoadingOverlay {
+            position: fixed; inset: 0; z-index: 200; background: #0a0101;
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            gap: 1.25rem; padding: 2rem; text-align: center;
+        }
+        #mobileLoadingOverlay.active { display: flex; }
+        #mobileLoadingOverlay .loading-mark { font-size: 2.25rem; font-weight: 700; letter-spacing: 0.15em; }
+        #mobileLoadingOverlay .loading-spinner {
+            width: 34px; height: 34px; border-radius: 50%;
+            border: 2.5px solid rgba(212,175,55,0.25); border-top-color: #E8C767;
+            animation: ibex-spin 0.9s linear infinite;
+        }
+        @keyframes ibex-spin { to { transform: rotate(360deg); } }
+        #mobileLoadingOverlay .loading-text {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em;
+            color: #b8b8b8; min-height: 2.2em; max-width: 320px;
+            opacity: 1; transition: opacity 0.35s ease;
+        }
+        #mobileLoadingOverlay .loading-text.fade { opacity: 0; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
@@ -347,7 +411,7 @@
 
             <div class="mt-8 pt-6 border-t gold-border text-center text-xs text-gray-500 space-y-1">
                 <p class="font-semibold text-gray-400">CREATED BY SAMARTH DAVE</p>
-                <p>FOUNDER OF <a href="https://machsevenstudios-website.onrender.com" target="_blank" class="gold-gradient-text hover:underline font-semibold">MACHSEVENSTUDIOS</a></p>
+                <p>FOUNDER OF <a href="https://machsevenstudios-website.onrender.com" target="_blank" class="gold-gradient-text hover:underline font-semibold">MACHSEVEN</a></p>
                 <p class="text-[10px] text-yellow-600/80 tracking-widest uppercase pt-1">POWERED BY METASYS<sup>®</sup></p>
             </div>
         </div>
@@ -374,12 +438,6 @@
                     <button onclick="openCentralAnalytics()" title="Aggregated, read-only analytics across every branch" class="branch-central-analytics-btn text-[10px] bg-[#1a1a1a] hover:bg-[#252525] gold-gradient-text border gold-border rounded fast-transition whitespace-nowrap">📊 Centralised Analytics</button>
                 </div>
 
-                <div class="user-info-box">
-                    <div class="text-gray-400 text-xs">Logged in as</div>
-                    <div id="headerFullName" class="font-bold gold-gradient-text text-sm">—</div>
-                    <div id="headerPermBadge" class="flex items-center gap-1 mt-0.5"></div>
-                </div>
-
                 <button onclick="handleLogout()" class="text-xs bg-[#161616] hover:bg-[#222] text-red-400 border border-red-900/40 px-3 py-2 rounded-lg fast-transition">Logout</button>
             </div>
         </header>
@@ -390,11 +448,19 @@
                 <div class="px-6 pb-1">
                     <div class="elegant-font text-3xl font-bold gold-gradient-text tracking-wide sidebar-fade-text">I.B.E.X.</div>
                 </div>
-                <div class="px-6 pb-2 text-[11px] font-bold text-gray-500 uppercase tracking-widest sidebar-fade-text">Enterprise Modules</div>
+                <div class="sidebar-home-row sidebar-fade-text">
+                    <div class="text-[11px] font-bold text-gray-500 uppercase tracking-widest">Enterprise Modules</div>
+                    <button onclick="goToHomeDashboard()" title="Go to Welcome dashboard" aria-label="Home" class="sidebar-home-btn">⌂</button>
+                </div>
                 <div class="px-3 space-y-1" id="moduleGroups"></div>
                 <div class="mt-auto px-6 pt-6 border-t gold-border text-[11px] text-gray-400 space-y-1 bg-[#090909] sidebar-fade-text">
-                    <p class="text-gray-300">Founded by <a href="https://machsevenstudios-website.onrender.com" target="_blank" class="gold-gradient-text hover:underline">MachSevenStudios</a></p>
+                    <p class="text-gray-300">Founded by <a href="https://machsevenstudios-website.onrender.com" target="_blank" class="gold-gradient-text hover:underline">MachSeven</a></p>
                     <p class="text-[10px] text-yellow-600 font-bold uppercase tracking-widest pt-1">Powered by Metasys<sup>®</sup></p>
+                    <div class="sidebar-user-panel">
+                        <div class="text-gray-500 text-[10px] uppercase tracking-widest">Logged in as</div>
+                        <div id="headerFullName" class="font-bold gold-gradient-text text-sm">—</div>
+                        <div id="headerPermBadge" class="flex items-center gap-1 mt-1 flex-wrap"></div>
+                    </div>
                 </div>
             </nav>
 
@@ -551,6 +617,28 @@
         </div>
     </div>
 
+    <div id="passwordGateModal" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center hidden z-[60] p-4">
+        <div class="glass-panel border gold-border p-6 sm:p-8 rounded-2xl w-full max-w-sm shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-extrabold gold-gradient-text uppercase tracking-wider">Confirm Identity</h3>
+                <button onclick="closePasswordGate()" class="text-gray-400 hover:text-white text-lg font-bold">✕</button>
+            </div>
+            <p class="text-xs text-gray-400 mb-4">Re-enter your password to continue — <span id="passwordGateTarget" class="text-yellow-500 font-semibold">this action</span> requires confirmation.</p>
+            <div class="space-y-4">
+                <input type="password" id="passwordGateInput" placeholder="Your password" onkeydown="if(event.key==='Enter') submitPasswordGate()" class="w-full bg-[#0c0c0c] border gold-border rounded-xl px-4 py-3 text-sm text-gray-200 gold-border-glow focus:outline-none">
+                <div id="passwordGateError" class="auth-error"></div>
+                <button onclick="submitPasswordGate()" class="w-full gold-bg hover:opacity-95 text-black font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Confirm & Continue</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MOBILE LOADING OVERLAY -->
+    <div id="mobileLoadingOverlay">
+        <div class="loading-mark gold-gradient-text elegant-font">I.B.E.X.</div>
+        <div class="loading-spinner"></div>
+        <div id="mobileLoadingText" class="loading-text">Establishing secure connection to institute database…</div>
+    </div>
+
     <!-- ============ MAIN JAVASCRIPT ============ -->
     <script>
         // --- Chart.js guard ---
@@ -603,6 +691,7 @@
                 ['invigilation', '👁️', 'Invigilation'],
                 ['results', '▣', 'Results'],
                 ['history', '◷', 'History'],
+                ['performance', '📈', 'Performance'],
             ],
             front_office: [
                 ['inquiry', '📞', 'Inquiry & Lead Tracker'],
@@ -613,7 +702,7 @@
             ],
         };
         const MODULE_HEAD = Object.fromEntries(Object.entries(HEAD_MODULES).flatMap(([h, ms]) => ms.map(([m]) => [m, h])));
-        const HEAD_LABELS = { homepage: 'Homepage', administrations: 'Administrations', examination: 'Examination', front_office: 'Management' };
+        const HEAD_LABELS = { homepage: 'Front Office', administrations: 'Administrations', examination: 'Examination', front_office: 'Management' };
         const OWNER_ONLY_MODULES = new Set(['users', 'journal', 'audit_history']);
         const STAFF_GRANTABLE_MODULES = [...HEAD_MODULES.administrations, ...HEAD_MODULES.examination, ...HEAD_MODULES.front_office]
             .map(([m]) => m).filter(m => !OWNER_ONLY_MODULES.has(m));
@@ -775,11 +864,56 @@
             return res;
         }
 
+        // ----- Mobile boot-time loading carousel -----
+        const MOBILE_LOADING_LINES = [
+            'Polishing dashboard metrics...',
+            'Organizing records into readable insights...',
+            'Fetching active lecture status...',
+            'Applying role-based security permissions...',
+            'Establishing secure connection to institute database...',
+            'Consolidating daily attendance logs and leave records...',
+            'Synchronizing institutional branch data...',
+            'Preparing automated notification templates...',
+        ];
+        let __mobileLoadingTimer = null;
+        let __mobileLoadingIdx = 0;
+
+        function showMobileLoadingOverlay() {
+            if (window.innerWidth > 768) return;
+            const overlay = document.getElementById('mobileLoadingOverlay');
+            const textEl = document.getElementById('mobileLoadingText');
+            if (!overlay || !textEl) return;
+            __mobileLoadingIdx = 0;
+            textEl.textContent = MOBILE_LOADING_LINES[0];
+            overlay.classList.add('active');
+            clearInterval(__mobileLoadingTimer);
+            __mobileLoadingTimer = setInterval(() => {
+                __mobileLoadingIdx = (__mobileLoadingIdx + 1) % MOBILE_LOADING_LINES.length;
+                textEl.classList.add('fade');
+                setTimeout(() => {
+                    textEl.textContent = MOBILE_LOADING_LINES[__mobileLoadingIdx];
+                    textEl.classList.remove('fade');
+                }, 350);
+            }, 5000);
+        }
+
+        function hideMobileLoadingOverlay() {
+            clearInterval(__mobileLoadingTimer);
+            __mobileLoadingTimer = null;
+            const overlay = document.getElementById('mobileLoadingOverlay');
+            if (overlay) overlay.classList.remove('active');
+        }
+
         async function initApp() {
             currentModule = 'home';
             document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
-            await loadBranches();
-            await refreshCurrentModule();
+            showMobileLoadingOverlay();
+            try {
+                await loadBranches();
+                await refreshCurrentModule();
+            } finally {
+                hideMobileLoadingOverlay();
+            }
         }
 
         // Resume session on page load (persistent login)
@@ -920,6 +1054,53 @@
             }).join('');
         }
 
+        // Modules that require a password re-verification popup before entry.
+        const SENSITIVE_MODULES = new Set(['fees', 'users', 'audit_history', 'journal']);
+        let __pendingGateAction = null;
+
+        function requestPasswordGate(targetLabel, moduleKey, onSuccess) {
+            __pendingGateAction = { targetLabel, moduleKey, onSuccess };
+            const input = document.getElementById('passwordGateInput');
+            input.value = '';
+            document.getElementById('passwordGateError').textContent = '';
+            document.getElementById('passwordGateTarget').textContent = targetLabel;
+            document.getElementById('passwordGateModal').classList.remove('hidden');
+            setTimeout(() => input.focus(), 50);
+        }
+
+        function closePasswordGate() {
+            document.getElementById('passwordGateModal').classList.add('hidden');
+            __pendingGateAction = null;
+        }
+
+        async function submitPasswordGate() {
+            if (!__pendingGateAction) return;
+            const password = document.getElementById('passwordGateInput').value;
+            const errEl = document.getElementById('passwordGateError');
+            if (!password) { errEl.textContent = 'Enter your password.'; return; }
+            try {
+                const res = await authFetch('/api/auth/verify-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        password,
+                        target_module: __pendingGateAction.moduleKey,
+                        target_label: __pendingGateAction.targetLabel,
+                    }),
+                });
+                const data = await readApiJson(res, 'Password verification');
+                if (!data.verified) {
+                    errEl.textContent = 'Incorrect password. This attempt has been logged.';
+                    return;
+                }
+                const onSuccess = __pendingGateAction.onSuccess;
+                closePasswordGate();
+                if (typeof onSuccess === 'function') onSuccess();
+            } catch (err) {
+                errEl.textContent = err.message || 'Verification failed. Please try again.';
+            }
+        }
+
         async function switchModule(moduleName, clickedButton = null) {
             if (!isOwner && OWNER_ONLY_MODULES.has(moduleName)) {
                 alert('That module is restricted to the institute owner.');
@@ -929,6 +1110,15 @@
                 alert('Your account does not have access to that module.');
                 return;
             }
+            if (SENSITIVE_MODULES.has(moduleName)) {
+                const label = moduleName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                requestPasswordGate(label, moduleName, () => _switchModuleAfterGate(moduleName, clickedButton));
+                return;
+            }
+            await _switchModuleAfterGate(moduleName, clickedButton);
+        }
+
+        async function _switchModuleAfterGate(moduleName, clickedButton = null) {
             currentModule = moduleName;
             document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
             if (clickedButton) clickedButton.classList.add('active');
@@ -941,13 +1131,17 @@
 
         function switchHead(head) {
             if (!isOwner && head === 'homepage') return;
-            if (head === 'homepage') {
-                currentModule = 'home';
-                document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
-                refreshCurrentModule();
-                return;
-            }
+            // Every parent head — including the renamed "Front Office" (formerly
+            // Homepage) — now just expands/collapses its children. Use the
+            // dedicated home icon beside "Enterprise Modules" to jump to the
+            // Welcome dashboard instead.
             toggleModuleHead(head);
+        }
+
+        function goToHomeDashboard() {
+            currentModule = 'home';
+            document.querySelectorAll('.sidebar-item').forEach(btn => btn.classList.remove('active'));
+            refreshCurrentModule();
         }
 
         function applyResponsiveSidebarDefault() {
@@ -1069,6 +1263,8 @@
                     await window.renderResults();
                 } else if (currentModule === 'history') {
                     await window.renderHistory();
+                } else if (currentModule === 'performance') {
+                    await renderPerformanceModule(container);
                 } else if (currentModule === 'whatsapp') {
                     await renderWhatsAppModule(container);
                 } else if (currentModule === 'journal') {
@@ -1238,6 +1434,136 @@
             } catch (err) {
                 summary.textContent = 'Unavailable';
                 list.innerHTML = `<p class="text-xs text-red-400">${esc(err.message || 'Could not load slump analysis.')}</p>`;
+            }
+        }
+
+        // ----- Examination > Performance -----
+        let __performanceBatchFilter = '';
+
+        async function renderPerformanceModule(container) {
+            container.innerHTML = `
+                <div class="space-y-8">
+                    <div class="flex justify-between items-end flex-wrap gap-3">
+                        <div>
+                            <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Performance</h2>
+                            <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Exam analytics · toppers, averages & score distribution</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input id="performanceBatchInput" type="text" placeholder="Filter by batch (optional)" value="${esc(__performanceBatchFilter)}" class="bg-[#0c0c0c] border gold-border rounded-lg px-3 py-2 text-xs text-gray-200 focus:outline-none w-48">
+                            <button onclick="loadPerformanceData()" class="ibex-action-btn secondary"><span>Load</span></button>
+                        </div>
+                    </div>
+                    <div id="performanceError" class="auth-error"></div>
+                    <div id="performanceContent" class="space-y-8">
+                        <div class="glass-panel border gold-border p-10 rounded-2xl text-center text-gray-500">Loading performance data…</div>
+                    </div>
+                </div>
+            `;
+            await loadPerformanceData();
+        }
+
+        async function loadPerformanceData() {
+            const input = document.getElementById('performanceBatchInput');
+            __performanceBatchFilter = input ? input.value.trim() : '';
+            const errorEl = document.getElementById('performanceError');
+            const content = document.getElementById('performanceContent');
+            if (errorEl) errorEl.textContent = '';
+            try {
+                if (!currentBranchId) throw new Error('No branch selected.');
+                const qs = __performanceBatchFilter ? `?batch=${encodeURIComponent(__performanceBatchFilter)}` : '';
+                const res = await authFetch(`/api/exam/performance/${currentBranchId}${qs}`);
+                const data = await readApiJson(res, 'Performance request');
+                renderPerformanceContent(data);
+            } catch (err) {
+                if (errorEl) errorEl.textContent = err.message || 'Failed to load performance data.';
+                if (content) content.innerHTML = '<div class="glass-panel border border-red-900/40 p-8 rounded-2xl text-center text-gray-500">Performance data could not be loaded.</div>';
+            }
+        }
+
+        function renderPerformanceContent(d) {
+            const el = document.getElementById('performanceContent');
+            if (!el) return;
+
+            if (!d.attempt_count) {
+                el.innerHTML = `<div class="glass-panel border gold-border p-10 rounded-2xl text-center text-gray-500">No graded exam results found${d.batch && d.batch !== 'All Batches' ? ` for batch "${esc(d.batch)}"` : ''} yet. Add marks in the Results module first.</div>`;
+                return;
+            }
+
+            const subjects = d.subject_averages || [];
+            const maxSubjAvg = Math.max(1, ...subjects.map(s => s.average_pct || 0));
+
+            el.innerHTML = `
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    ${[
+                        ['Scope', esc(d.batch || 'All Batches'), 'batch filter'],
+                        ['Attempts Graded', d.attempt_count, 'result rows'],
+                        ['Overall Average', `${d.overall_average_pct ?? '—'}%`, 'across all attempts'],
+                        ['Pass Threshold', `${d.pass_threshold_pct ?? 40}%`, 'below this = failing'],
+                    ].map(k => `<div class="glass-panel border gold-border p-5 rounded-2xl"><div class="text-[10px] text-gray-500 uppercase tracking-widest mb-2">${k[0]}</div><div class="text-2xl font-black gold-gradient-text">${k[1]}</div><div class="text-[10px] text-gray-500 mt-1">${k[2]}</div></div>`).join('')}
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="glass-panel border gold-border p-6 rounded-2xl">
+                        <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Subject-wise Averages</h3><span class="text-xs text-gray-500">${subjects.length} subject(s)</span></div>
+                        <div class="space-y-4">
+                            ${subjects.length ? subjects.map(s => analyticsBar(s.average_pct || 0, maxSubjAvg, s.subject, `${s.average_pct || 0}% · ${s.attempts} attempt(s)`)).join('') : '<p class="text-xs text-gray-500">No subject data yet.</p>'}
+                        </div>
+                    </div>
+                    <div class="glass-panel border gold-border p-6 rounded-2xl">
+                        <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Score Distribution</h3><span class="text-xs text-gray-500">all graded attempts</span></div>
+                        <canvas id="performanceDistChart" height="200"></canvas>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="glass-panel border gold-border p-6 rounded-2xl">
+                        <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">🏆 Batch Toppers</h3><span class="text-xs text-gray-500">top ${(d.toppers || []).length}</span></div>
+                        <div class="space-y-2">
+                            ${(d.toppers || []).length ? d.toppers.map((s, i) => `
+                                <div class="flex items-center justify-between bg-[#0c0c0c] border gold-border rounded-xl px-4 py-2.5">
+                                    <div class="flex items-center gap-3"><span class="text-xs text-gray-500 font-bold w-5">${i + 1}</span><span class="text-sm text-gray-200 font-semibold">${esc(s.student_name)}</span>${s.roll_number ? `<span class="text-[10px] text-gray-500">#${esc(s.roll_number)}</span>` : ''}</div>
+                                    <span class="text-sm font-black gold-gradient-text">${s.average_pct}%</span>
+                                </div>`).join('') : '<p class="text-xs text-gray-500">No results yet.</p>'}
+                        </div>
+                    </div>
+                    <div class="glass-panel border gold-border p-6 rounded-2xl">
+                        <div class="flex justify-between items-center mb-5"><h3 class="text-sm font-extrabold text-red-400 uppercase tracking-wider">⚠ Failing Students</h3><span class="text-xs text-gray-500">below ${d.pass_threshold_pct ?? 40}%</span></div>
+                        <div class="space-y-2">
+                            ${(d.failing || []).length ? d.failing.map(s => `
+                                <div class="flex items-center justify-between bg-[#160d0d] border border-red-900/40 rounded-xl px-4 py-2.5">
+                                    <div class="flex items-center gap-3"><span class="text-sm text-gray-200 font-semibold">${esc(s.student_name)}</span>${s.roll_number ? `<span class="text-[10px] text-gray-500">#${esc(s.roll_number)}</span>` : ''}</div>
+                                    <span class="text-sm font-black text-red-400">${s.average_pct}%</span>
+                                </div>`).join('') : '<p class="text-xs text-green-400">✓ No students currently failing.</p>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const distCanvas = document.getElementById('performanceDistChart');
+            if (distCanvas && window.Chart) {
+                const dist = d.distribution || [];
+                IBEXChart(distCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels: dist.map(b => b.range),
+                        datasets: [{
+                            label: 'Attempts',
+                            data: dist.map(b => b.count),
+                            backgroundColor: 'rgba(232, 199, 103, 0.55)',
+                            borderColor: '#E8C767',
+                            borderWidth: 1,
+                            borderRadius: 6,
+                        }],
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            x: { ticks: { color: '#9ca3af' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                            y: { beginAtZero: true, ticks: { color: '#9ca3af', precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        },
+                    },
+                });
             }
         }
 
@@ -1460,13 +1786,13 @@
                         </div>
                         ${canWrite ? `
                         <div class="flex items-center flex-wrap gap-3">
-                            <button onclick="openRecordModal('${moduleName}')" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add New Record</button>
-                            <button onclick="openBulkImportModal('${moduleName}')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add Document</button>
+                            <button onclick="openRecordModal('${moduleName}')" class="ibex-action-btn primary">+ Add New Record</button>
+                            <button onclick="openBulkImportModal('${moduleName}')" class="ibex-action-btn secondary"><span>+ Add Document</span></button>
                         </div>` : ''}
                     </div>
                     <div class="flex items-center justify-end flex-wrap gap-3">
-                        <button onclick="exportModulePDF('${moduleName}')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Export PDF</button>
-                        <button onclick="exportModuleExcel('${moduleName}')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Export Excel</button>
+                        <button onclick="exportModulePDF('${moduleName}')" class="ibex-action-btn secondary"><span>Export PDF</span></button>
+                        <button onclick="exportModuleExcel('${moduleName}')" class="ibex-action-btn secondary"><span>Export Excel</span></button>
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 overflow-x-auto shadow-2xl">
                         <table class="w-full text-left text-sm text-gray-300">
@@ -1536,13 +1862,13 @@
                         </div>
                         ${canWrite ? `
                         <div class="flex items-center flex-wrap gap-3">
-                            <button onclick="openRecordModal('students')" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add New Record</button>
-                            <button onclick="openBulkImportModal('students')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add Document</button>
+                            <button onclick="openRecordModal('students')" class="ibex-action-btn primary">+ Add New Record</button>
+                            <button onclick="openBulkImportModal('students')" class="ibex-action-btn secondary"><span>+ Add Document</span></button>
                         </div>` : ''}
                     </div>
                     <div class="flex items-center justify-end flex-wrap gap-3">
-                        <button onclick="exportModulePDF('students')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Export PDF</button>
-                        <button onclick="exportModuleExcel('students')" class="bg-[#141414] hover:bg-[#1f1f1f] gold-gradient-text border gold-border font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Export Excel</button>
+                        <button onclick="exportModulePDF('students')" class="ibex-action-btn secondary"><span>Export PDF</span></button>
+                        <button onclick="exportModuleExcel('students')" class="ibex-action-btn secondary"><span>Export Excel</span></button>
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl">
                         <input type="text" id="studentSearchInput" placeholder="Search student by name..." class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 gold-border-glow focus:outline-none mb-4">
@@ -1777,9 +2103,16 @@
         }
         function closeBulkImportModal() { document.getElementById('bulkImportModal').classList.add('hidden'); }
 
-        async function submitBulkImport() {
+        function submitBulkImport() {
             const errorEl = document.getElementById('bulkImportError');
             errorEl.textContent = '';
+            const fileInput = document.getElementById('bulkImportFile');
+            if (!fileInput.files[0]) { errorEl.textContent = 'Please choose a CSV file first.'; return; }
+            requestPasswordGate(`Importing data — ${bulkImportModule}`, bulkImportModule, () => _performBulkImport());
+        }
+
+        async function _performBulkImport() {
+            const errorEl = document.getElementById('bulkImportError');
             const fileInput = document.getElementById('bulkImportFile');
             if (!fileInput.files[0]) { errorEl.textContent = 'Please choose a CSV file first.'; return; }
             const formData = new FormData();
@@ -1839,7 +2172,7 @@
             attendance: 'Attendance', analytics: 'Analytics', timetables: 'Timetable', seating: 'Seating',
             invigilation: 'Invigilation', fees: 'Fees', assistant: 'Parallax', whatsapp: 'WhatsApp Messaging',
             results: 'Results', history: 'History', journal: 'Journal', audit_history: 'Audit History',
-            inquiry: 'Inquiry & Lead Tracker', users: 'Manage Users',
+            inquiry: 'Inquiry & Lead Tracker', users: 'Manage Users', performance: 'Performance',
         };
 
         let usersCache = [];
@@ -1852,7 +2185,7 @@
                             <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Manage Users</h2>
                             <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Grant, monitor, and revoke staff access</p>
                         </div>
-                        <button onclick="openUserModal()" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add User</button>
+                        <button onclick="openUserModal()" class="ibex-action-btn primary">+ Add User</button>
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 overflow-x-auto shadow-2xl">
                         <table class="w-full text-left text-sm text-gray-300">
@@ -2732,7 +3065,7 @@
                             <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Director's Journal</h2>
                             <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Private reflections · auto-stamped</p>
                         </div>
-                        <button onclick="openJournalComposer()" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">+ Add Entry</button>
+                        <button onclick="openJournalComposer()" class="ibex-action-btn primary">+ Add Entry</button>
                     </div>
                     <div id="journalComposer" class="glass-panel border gold-border rounded-2xl p-6 shadow-2xl hidden">
                         <label class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">New Entry</label>
@@ -2836,6 +3169,7 @@
             CREATE_INQUIRY: 'logged a new inquiry',
             UPDATE_INQUIRY: 'updated an inquiry',
             DELETE_INQUIRY: 'deleted an inquiry',
+            PASSWORD_CHECK: 'password re-verification',
         };
 
         function describeAudit(row) {
@@ -2882,13 +3216,28 @@
                     body.innerHTML = `<div class="text-xs text-gray-500 text-center py-6">No activity recorded yet.</div>`;
                     return;
                 }
-                body.innerHTML = entries.map(e => `
+                body.innerHTML = entries.map(e => {
+                    if (e.action_type === 'PASSWORD_CHECK') {
+                        const after = (e.payload || {}).after || {};
+                        const allowed = (after.status || '') === 'Access Allowed';
+                        return `
+                        <div class="flex items-start gap-4 py-3 border-b border-gray-900">
+                            <div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold w-44 shrink-0">${esc(new Date(e.timestamp).toLocaleString('en-IN'))}</div>
+                            <div class="flex-1 text-sm text-gray-200">
+                                <span class="font-semibold">${esc(e.user_name || after.user_name || 'Unknown')}</span>
+                                requested access — <span class="text-yellow-500">${esc(after.target_label || after.target_module || 'sensitive area')}</span>
+                            </div>
+                            <div class="text-[10px] uppercase tracking-widest font-bold shrink-0 ${allowed ? 'text-green-400' : 'text-red-400'}">${allowed ? 'Access Allowed' : 'Access Denied'}</div>
+                        </div>`;
+                    }
+                    return `
                     <div class="flex items-start gap-4 py-3 border-b border-gray-900">
                         <div class="text-[10px] uppercase tracking-widest text-gray-500 font-bold w-44 shrink-0">${esc(new Date(e.timestamp).toLocaleString('en-IN'))}</div>
                         <div class="flex-1 text-sm text-gray-200">${esc(describeAudit(e))}</div>
                         <div class="text-[10px] uppercase tracking-widest text-gray-600 shrink-0">${esc(e.branch_name || '')}</div>
                     </div>
-                `).join('');
+                `;
+                }).join('');
             } catch (err) {
                 document.getElementById('auditLogBody').innerHTML = `<div class="text-xs text-red-400 text-center py-6">${esc(err.message || 'Could not load audit history.')}</div>`;
             }
@@ -2904,7 +3253,7 @@
                             <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">Inquiry & Lead Tracker</h2>
                             <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Prospective walk-ins & follow-ups</p>
                         </div>
-                        ${canWrite ? `<button onclick="openInquiryModal()" class="gold-bg hover:opacity-95 text-black font-extrabold px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider shadow-lg">+ Log Inquiry</button>` : ''}
+                        ${canWrite ? `<button onclick="openInquiryModal()" class="ibex-action-btn primary">+ Log Inquiry</button>` : ''}
                     </div>
                     <div class="glass-panel border gold-border rounded-2xl p-6 overflow-x-auto shadow-2xl">
                         <table class="w-full text-left text-sm text-gray-300">
