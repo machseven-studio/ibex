@@ -92,6 +92,11 @@ WHATSAPP_API_URL = os.getenv("WHATSAPP_API_URL")
 WHATSAPP_API_TOKEN = os.getenv("WHATSAPP_API_TOKEN")
 WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
 
+# IBEX Fair-Usage: monthly utility-message allowance per institute.
+# Beyond the cap, sends are paid for from the institute's prepaid overage credits.
+WHATSAPP_MONTHLY_MESSAGE_CAP = int(os.getenv("IBEX_WHATSAPP_MONTHLY_CAP", "2500"))
+WHATSAPP_OVERAGE_RATE_PER_MESSAGE = float(os.getenv("IBEX_WHATSAPP_OVERAGE_RATE", "0.20"))
+
 GATED_MODULES = {"fees", "users", "journal", "audit_history"}
 GATE_TTL_SECONDS = 15 * 60
 
@@ -178,6 +183,17 @@ def init_db():
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )""",
+        # IBEX Fair-Usage: one row per institute per calendar month (YYYY-MM).
+        """CREATE TABLE IF NOT EXISTS institute_whatsapp_usage (
+            id SERIAL PRIMARY KEY,
+            institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+            month_year TEXT NOT NULL,
+            messages_sent INTEGER NOT NULL DEFAULT 0,
+            message_cap INTEGER NOT NULL DEFAULT 2500,
+            overage_rate NUMERIC(10,2) NOT NULL DEFAULT 0.20,
+            prepaid_overage_credits NUMERIC(10,2) NOT NULL DEFAULT 0,
+            UNIQUE(institute_id, month_year)
+        )""",
     ]
     for stmt in statements:
         cur.execute(stmt)
@@ -250,6 +266,11 @@ def init_db():
         "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS institute_id INTEGER",
         "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS actor_type TEXT NOT NULL DEFAULT 'unknown'",
         "ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS actor_id TEXT",
+        # WhatsApp fair-usage additions (safe on an already-created table)
+        "ALTER TABLE institute_whatsapp_usage ADD COLUMN IF NOT EXISTS messages_sent INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE institute_whatsapp_usage ADD COLUMN IF NOT EXISTS message_cap INTEGER NOT NULL DEFAULT 2500",
+        "ALTER TABLE institute_whatsapp_usage ADD COLUMN IF NOT EXISTS overage_rate NUMERIC(10,2) NOT NULL DEFAULT 0.20",
+        "ALTER TABLE institute_whatsapp_usage ADD COLUMN IF NOT EXISTS prepaid_overage_credits NUMERIC(10,2) NOT NULL DEFAULT 0",
     ]:
         cur.execute(stmt)
 
@@ -316,6 +337,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_gate_tokens_expires ON module_gate_tokens(expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_exam_results_branch_batch ON exam_results(branch_id, batch_name)",
         "CREATE INDEX IF NOT EXISTS idx_exam_history_branch_date ON exam_history(branch_id, exam_date)",
+        "CREATE INDEX IF NOT EXISTS idx_wa_usage_institute_month ON institute_whatsapp_usage(institute_id, month_year)",
     ]:
         cur.execute(stmt)
     conn.commit()
@@ -1609,12 +1631,75 @@ def search_institute(branch_id: int, q: str = "", institute: CurrentInstitute = 
 
 
 # ---------------------------------------------------------------------------
-# WhatsApp — hardened branch/module scoping
+# WhatsApp — hardened branch/module scoping + fair-usage accounting
 # ---------------------------------------------------------------------------
 
-def send_whatsapp(to_number: str, message: str) -> bool:
+def check_and_increment_whatsapp_usage(institute_id: int) -> None:
+    """Fair-usage gate for WhatsApp utility messages.
+
+    Counts one message against the institute's monthly allowance (YYYY-MM, IST):
+      * while messages_sent < message_cap  -> increment and allow.
+      * once the cap is hit                -> consume 1 prepaid overage credit and allow.
+      * no credits left                    -> raise a clean 429 with a top-up message.
+    Runs in a single transaction with FOR UPDATE so concurrent sends can't overshoot the cap.
+    """
+    month_year = _ist_now().strftime("%Y-%m")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        # Create this month's row on first use (no-op if it already exists).
+        cur.execute(
+            """INSERT INTO institute_whatsapp_usage
+                   (institute_id, month_year, messages_sent, message_cap, overage_rate, prepaid_overage_credits)
+               VALUES (%s, %s, 0, %s, %s, 0)
+               ON CONFLICT (institute_id, month_year) DO NOTHING""",
+            (institute_id, month_year, WHATSAPP_MONTHLY_MESSAGE_CAP, WHATSAPP_OVERAGE_RATE_PER_MESSAGE),
+        )
+        # Lock the row for the rest of the transaction.
+        cur.execute(
+            """SELECT messages_sent, message_cap, prepaid_overage_credits
+               FROM institute_whatsapp_usage
+               WHERE institute_id = %s AND month_year = %s
+               FOR UPDATE""",
+            (institute_id, month_year),
+        )
+        row = cur.fetchone()
+        sent = int(row["messages_sent"] or 0)
+        cap = int(row["message_cap"] or WHATSAPP_MONTHLY_MESSAGE_CAP)
+        credits = float(row["prepaid_overage_credits"] or 0)
+
+        if sent < cap:
+            # Within the free monthly allowance.
+            cur.execute(
+                "UPDATE institute_whatsapp_usage SET messages_sent = messages_sent + 1 WHERE institute_id = %s AND month_year = %s",
+                (institute_id, month_year),
+            )
+        elif credits > 0:
+            # Over the cap — spend one prepaid overage credit.
+            cur.execute(
+                """UPDATE institute_whatsapp_usage
+                   SET messages_sent = messages_sent + 1,
+                       prepaid_overage_credits = prepaid_overage_credits - 1
+                   WHERE institute_id = %s AND month_year = %s""",
+                (institute_id, month_year),
+            )
+        else:
+            conn.rollback()
+            raise HTTPException(
+                status_code=429,
+                detail=f"WhatsApp monthly limit reached ({cap:,} utility messages). Please top up credits to send more alerts.",
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def send_whatsapp(institute_id: int, to_number: str, message: str) -> bool:
+    # Not configured -> nothing is sent and no quota is consumed.
     if not all([WHATSAPP_API_URL, WHATSAPP_API_TOKEN, WHATSAPP_PHONE_NUMBER_ID]):
         return False
+    # Fair-usage gate runs before the network call; raises HTTPException(429) when exhausted.
+    check_and_increment_whatsapp_usage(institute_id)
     import requests
     url = f"{WHATSAPP_API_URL.rstrip('/')}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
     headers = {"Authorization": f"Bearer {WHATSAPP_API_TOKEN}", "Content-Type": "application/json"}
@@ -1653,7 +1738,14 @@ def send_absence_notification(req: WhatsAppAbsenceRequest, institute: CurrentIns
         if not parent_contact.startswith('+'):
             parent_contact = '+91' + parent_contact
         msg = f"Attendance Alert: Your ward {row['name']} was marked ABSENT on {req.date}. Please contact the institute for further details."
-        sent = send_whatsapp(parent_contact, msg)
+        # The attendance mark already succeeded; if the monthly quota is exhausted
+        # we report it instead of failing the whole request.
+        try:
+            sent = send_whatsapp(institute.id, parent_contact, msg)
+        except HTTPException as exc:
+            audit_write(institute, req.branch_id, "WHATSAPP_ABSENCE", None,
+                        {"student_id": row["id"], "date": req.date, "sent": False, "reason": exc.detail})
+            return {"status": "skipped", "reason": exc.detail}
         audit_write(institute, req.branch_id, "WHATSAPP_ABSENCE", None,
                     {"student_id": row["id"], "date": req.date, "sent": sent})
         return {"status": "sent" if sent else "failed"}
@@ -1697,6 +1789,7 @@ def send_fee_reminders(req: WhatsAppFeeRemindersRequest, institute: CurrentInsti
         """, params)
         rows = cur.fetchall()
         sent_count = 0
+        limit_message = None
         for row in rows:
             name, contact = row["student_name"], row["parent_contact"]
             if not contact:
@@ -1704,66 +1797,16 @@ def send_fee_reminders(req: WhatsAppFeeRemindersRequest, institute: CurrentInsti
             if not contact.startswith('+'):
                 contact = '+91' + contact
             msg = f"Fee Reminder: Your ward {name} has a pending fee of ₹{row['amount_inr']} due on {row['due_date']}. Please clear the dues at the earliest."
-            if send_whatsapp(contact, msg):
-                sent_count += 1
-        audit_write(institute, req.branch_id, "WHATSAPP_FEE_REMINDERS", None, {"sent": sent_count, "branch_id": req.branch_id})
-        return {"sent": sent_count}
-    finally:
-        conn.close()
-
-
-class BroadcastNoticeboardRequest(BaseModel):
-    branch_id: int | None = None  # None => institute-wide, owner/admin only
-    message: str
-    batch: str | None = None
-
-
-@app.post("/api/whatsapp/broadcast")
-def broadcast_notice(req: BroadcastNoticeboardRequest, institute: CurrentInstitute = Depends(require_write_access)):
-    check_module_access(institute, "whatsapp")
-    msg = (req.message or "").strip()
-    if not msg:
-        raise HTTPException(status_code=400, detail="Message body cannot be empty.")
-
-    # IBEX-SEC: institute-wide broadcast requires administrative rights, and
-    # any branch_id provided must belong to this institute.
-    if req.branch_id is None:
-        if not (institute.is_owner or institute.permission == "edit"):
-            raise HTTPException(status_code=403, detail="Institute-wide broadcasts require administrative access")
-    else:
-        verify_branch_ownership(req.branch_id, institute.id)
-
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        # Build SQL so the scope is enforced server-side.
-        if req.branch_id is not None:
-            branch_clause = "branch_id = %s AND branch_id IN (SELECT id FROM branches WHERE tenant_id=%s)"
-            base_params = [req.branch_id, institute.id]
-        else:
-            branch_clause = "branch_id IN (SELECT id FROM branches WHERE tenant_id=%s)"
-            base_params = [institute.id]
-
-        if req.batch:
-            sql = f"SELECT name, parent_contact FROM students WHERE {branch_clause} AND batch=%s AND parent_contact IS NOT NULL"
-            params = base_params + [req.batch]
-        else:
-            sql = f"SELECT name, parent_contact FROM students WHERE {branch_clause} AND parent_contact IS NOT NULL"
-            params = base_params
-
-        cur.execute(sql, params)
-        sent = 0
-        for row in cur.fetchall():
-            contact = row["parent_contact"]
-            if not contact:
-                continue
-            if not contact.startswith('+'):
-                contact = '+91' + contact
-            if send_whatsapp(contact, f"[IBEX Notice] {msg}"):
-                sent += 1
-        audit_write(institute, req.branch_id, "WHATSAPP_BROADCAST", None,
-                    {"sent": sent, "batch": req.batch, "branch_id": req.branch_id, "message": msg[:200]})
-        return {"sent": sent}
+            try:
+                if send_whatsapp(institute.id, contact, msg):
+                    sent_count += 1
+            except HTTPException as exc:
+                # Monthly allowance + prepaid credits are exhausted — stop the batch cleanly.
+                limit_message = exc.detail
+                break
+        audit_write(institute, req.branch_id, "WHATSAPP_FEE_REMINDERS", None,
+                    {"sent": sent_count, "branch_id": req.branch_id, "limit_reached": bool(limit_message)})
+        return {"sent": sent_count, "limit_reached": bool(limit_message), "message": limit_message}
     finally:
         conn.close()
 
