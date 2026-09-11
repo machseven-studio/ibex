@@ -12,7 +12,23 @@ const SHELL_URLS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS))
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // Best-effort pre-cache: a single missing asset (e.g. a 512px icon that
+      // wasn't shipped) must NOT block the whole service worker from
+      // installing. Each URL is fetched and cached independently.
+      await Promise.all(
+        SHELL_URLS.map(async (url) => {
+          try {
+            const res = await fetch(url, { cache: 'no-cache' });
+            if (res && res.ok) {
+              await cache.put(url, res.clone());
+            }
+          } catch (_) {
+            /* ignore individual asset failures */
+          }
+        })
+      );
+    })
   );
   self.skipWaiting();
 });
@@ -57,7 +73,9 @@ self.addEventListener('fetch', (event) => {
       caches.match(req).then((cached) => {
         const fetchPromise = fetch(req)
           .then((res) => {
-            caches.open(CACHE_NAME).then((cache) => cache.put(req, res.clone()));
+            if (res && res.ok) {
+              caches.open(CACHE_NAME).then((cache) => cache.put(req, res.clone()));
+            }
             return res;
           })
           .catch(() => cached);
