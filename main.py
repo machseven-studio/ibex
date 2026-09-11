@@ -95,7 +95,7 @@ MODULE_HEAD = {
     'attendance': 'administrations', 'syllabus': 'administrations',
     'timetables': 'administrations', 'whatsapp': 'administrations',
     'seating': 'examination', 'invigilation': 'examination',
-    'results': 'examination', 'history': 'examination',
+    'results': 'examination', 'history': 'examination', 'performance': 'examination',
     'inquiry': 'front_office', 'fees': 'front_office', 'users': 'front_office',
     'journal': 'front_office', 'audit_history': 'front_office',
 }
@@ -585,6 +585,56 @@ def logout(response: Response, alg_session: str | None = Cookie(default=None, al
         audit_system(None, None, "LOGOUT_SESSION", None, {"token": "redacted"})
     clear_session_cookie(response)
     return {"status": "logged out"}
+
+
+# ---------------------------------------------------------------------------
+# Password re-verification gate (sensitive modules + bulk import)
+# ---------------------------------------------------------------------------
+
+class PasswordVerifyPayload(BaseModel):
+    password: str
+    target_module: str | None = None
+    target_label: str | None = None
+
+
+@app.post("/api/auth/verify-password")
+def verify_password_gate(payload: PasswordVerifyPayload, institute: CurrentInstitute = Depends(get_current_institute)):
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        if institute.is_owner:
+            cur.execute("SELECT password_hash, password_salt FROM institutes WHERE id=%s", (institute.id,))
+        else:
+            cur.execute("SELECT password_hash, password_salt FROM staff_users WHERE id=%s", (institute.user_id,))
+        row = cur.fetchone()
+    finally:
+        conn.close()
+
+    ok = False
+    if row:
+        ok, upgraded_hash = verify_password(payload.password, row["password_hash"], row["password_salt"] or None)
+        if ok and upgraded_hash:
+            conn2 = get_conn()
+            try:
+                cur2 = conn2.cursor()
+                table = "institutes" if institute.is_owner else "staff_users"
+                target_id = institute.id if institute.is_owner else institute.user_id
+                cur2.execute(f"UPDATE {table} SET password_hash=%s WHERE id=%s", (upgraded_hash, target_id))
+                conn2.commit()
+            finally:
+                conn2.close()
+
+    status = "Access Allowed" if ok else "Access Denied"
+    audit_write(
+        institute, None, "PASSWORD_CHECK", None,
+        {
+            "user_name": institute.full_name,
+            "target_module": payload.target_module,
+            "target_label": payload.target_label,
+            "status": status,
+        },
+    )
+    return {"verified": ok}
 
 
 # ---------------------------------------------------------------------------
@@ -2613,3 +2663,86 @@ def delete_exam_history(history_id: int, institute: CurrentInstitute = Depends(r
         conn.commit(); return {"status": "success"}
     finally:
         conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Examination > Performance (analytics dashboard over exam_results)
+# ---------------------------------------------------------------------------
+
+PASS_THRESHOLD_PCT = 40.0
+
+@app.get("/api/exam/performance/{branch_id}")
+def exam_performance(branch_id: int, batch: str | None = None, institute: CurrentInstitute = Depends(get_current_institute)):
+    _exam_branch_check(institute, branch_id, "performance")
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        where = ["branch_id=%s", "marks IS NOT NULL", "overall_marks > 0"]
+        params: list = [branch_id]
+        if batch and batch.strip():
+            where.append("LOWER(TRIM(batch_name))=LOWER(TRIM(%s))")
+            params.append(batch)
+        cur.execute(f"""
+            SELECT id, batch_name, subjects, topics, exam_date, overall_marks,
+                   student_name, roll_number, marks
+            FROM exam_results
+            WHERE {' AND '.join(where)}
+            ORDER BY batch_name, student_name
+        """, params)
+        rows = [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+    if not rows:
+        return {
+            "batch": batch or "All Batches", "attempt_count": 0,
+            "overall_average_pct": None, "subject_averages": [],
+            "toppers": [], "failing": [], "distribution": [],
+        }
+
+    for r in rows:
+        r["pct"] = round((float(r["marks"]) / float(r["overall_marks"])) * 100, 2)
+
+    overall_avg = round(sum(r["pct"] for r in rows) / len(rows), 2)
+
+    by_subject: dict = defaultdict(list)
+    for r in rows:
+        subj = (r["subjects"] or "General").strip()
+        by_subject[subj].append(r["pct"])
+    subject_averages = [
+        {"subject": s, "average_pct": round(sum(v) / len(v), 2), "attempts": len(v)}
+        for s, v in sorted(by_subject.items())
+    ]
+
+    by_student: dict = defaultdict(list)
+    for r in rows:
+        key = (r["student_name"] or "Unnamed", r["roll_number"] or "")
+        by_student[key].append(r["pct"])
+    student_avgs = [
+        {"student_name": k[0], "roll_number": k[1], "average_pct": round(sum(v) / len(v), 2)}
+        for k, v in by_student.items()
+    ]
+    student_avgs.sort(key=lambda x: x["average_pct"], reverse=True)
+    toppers = student_avgs[:10]
+    failing = sorted(
+        [s for s in student_avgs if s["average_pct"] < PASS_THRESHOLD_PCT],
+        key=lambda x: x["average_pct"],
+    )[:25]
+
+    buckets = [(0, 40), (40, 50), (50, 60), (60, 70), (70, 80), (80, 90), (90, 100.01)]
+    distribution = []
+    for lo, hi in buckets:
+        count = sum(1 for r in rows if lo <= r["pct"] < hi)
+        label = f"{int(lo)}-{int(hi) if hi <= 100 else 100}%"
+        distribution.append({"range": label, "count": count})
+
+    return {
+        "batch": batch or "All Batches",
+        "attempt_count": len(rows),
+        "overall_average_pct": overall_avg,
+        "pass_threshold_pct": PASS_THRESHOLD_PCT,
+        "subject_averages": subject_averages,
+        "toppers": toppers,
+        "failing": failing,
+        "distribution": distribution,
+    }
