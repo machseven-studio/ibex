@@ -3006,31 +3006,24 @@
         }
 
         // ===== WhatsApp =====
+        // Broadcasts are no longer sent through this app — they are handled via
+        // WhatsApp groups outside of IBEX. Only absence alerts and fee reminders
+        // remain, and both count towards the institute's monthly utility-message
+        // allowance (2,500 free, then prepaid overage credits).
         async function renderWhatsAppModule(container) {
             const canWrite = myPermission !== 'read_only' && !isGlobalView;
             container.innerHTML = `
                 <div class="space-y-6">
                     <div>
                         <h2 class="text-2xl font-black uppercase gold-gradient-text tracking-wide">WhatsApp Messaging</h2>
-                        <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Send automated alerts and reminders</p>
+                        <p class="text-xs text-gray-400 mt-1 uppercase tracking-widest">Automated alerts · counted against the monthly utility-message allowance</p>
                     </div>
                     <div class="whatsapp-card">
                         <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Fee Reminders</h3>
                         <p class="text-xs text-gray-400 mt-1">Send WhatsApp reminders to parents whose fee due date is within 7 days (in the selected branch).</p>
+                        <p class="text-[11px] text-gray-500 mt-2">Monthly allowance: 2,500 utility messages per institute. Beyond that, sends draw on prepaid overage credits.</p>
                         ${canWrite ? `<button onclick="sendFeeReminders()" class="mt-3 gold-bg hover:opacity-95 text-black font-extrabold px-4 py-2 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Send Reminders Now</button>` : '<p class="text-xs text-gray-500 mt-2">You have read-only access.</p>'}
                         <div id="feeReminderResult" class="mt-3 text-xs text-gray-400"></div>
-                    </div>
-                    <div class="whatsapp-card">
-                        <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">📢 Broadcast Noticeboard</h3>
-                        <p class="text-xs text-gray-400 mt-1">Send an alert to every parent in this branch. Leave batch blank to send to everyone in the branch.</p>
-                        <div class="grid md:grid-cols-[1fr_200px] gap-3 mt-3">
-                            <textarea id="broadcastMessage" rows="3" placeholder="e.g. Institute will remain closed tomorrow due to heavy rain." class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-sm text-gray-200 focus:outline-none"></textarea>
-                            <div class="space-y-2">
-                                <input id="broadcastBatch" type="text" placeholder="Batch (optional)" class="w-full bg-[#0c0c0c] border gold-border rounded-xl p-3 text-xs text-gray-200 focus:outline-none">
-                                ${canWrite ? `<button onclick="sendBroadcast()" class="w-full gold-bg hover:opacity-95 text-black font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider fast-transition shadow-lg">Broadcast Now</button>` : ''}
-                            </div>
-                        </div>
-                        <div id="broadcastResult" class="mt-3 text-xs text-gray-400"></div>
                     </div>
                     <div class="whatsapp-card">
                         <h3 class="text-sm font-extrabold gold-gradient-text uppercase tracking-wider">Message Log</h3>
@@ -3053,29 +3046,21 @@
                     body: JSON.stringify({ branch_id: currentBranchId })
                 });
                 const data = await res.json();
-                if (res.ok) { resultDiv.textContent = `Sent ${data.sent || 0} reminders.`; }
-                else { resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to send reminders.'); }
+                if (res.ok) {
+                    const sent = data.sent || 0;
+                    if (data.limit_reached) {
+                        // Fair-usage cap was hit mid-batch — surface the top-up message.
+                        resultDiv.textContent = `Sent ${sent} reminder(s). ${data.message || 'Monthly allowance exhausted.'}`;
+                        resultDiv.classList.add('text-red-400');
+                    } else {
+                        resultDiv.textContent = `Sent ${sent} reminder(s).`;
+                        resultDiv.classList.remove('text-red-400');
+                    }
+                } else {
+                    resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to send reminders.');
+                    resultDiv.classList.add('text-red-400');
+                }
             } catch (e) { resultDiv.textContent = 'Error sending reminders.'; }
-        }
-
-        async function sendBroadcast() {
-            const msgEl = document.getElementById('broadcastMessage');
-            const batchEl = document.getElementById('broadcastBatch');
-            const resultDiv = document.getElementById('broadcastResult');
-            const message = (msgEl.value || '').trim();
-            if (!message) { resultDiv.textContent = 'Write a message first.'; return; }
-            if (!confirm('Send this WhatsApp broadcast to all matching parents in this branch?')) return;
-            resultDiv.textContent = 'Broadcasting…';
-            try {
-                const res = await authFetch('/api/whatsapp/broadcast', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ branch_id: currentBranchId, message, batch: (batchEl.value || '').trim() || null })
-                });
-                const data = await res.json();
-                if (res.ok) { resultDiv.textContent = `Sent to ${data.sent || 0} parent(s).`; msgEl.value = ''; }
-                else { resultDiv.textContent = apiErrorMessage(data.detail, 'Failed to broadcast.'); }
-            } catch (e) { resultDiv.textContent = 'Error broadcasting.'; }
         }
 
         // ===== Journal =====
@@ -3190,7 +3175,6 @@
             FEE_MARK_PAID: 'marked a fee as paid',
             WHATSAPP_ABSENCE: 'sent a WhatsApp absence alert',
             WHATSAPP_FEE_REMINDERS: 'sent WhatsApp fee reminders',
-            WHATSAPP_BROADCAST: 'broadcast a WhatsApp notice',
             PARALLAX_QUERY: 'asked Parallax a question',
             CREATE_JOURNAL: 'added a journal entry',
             DELETE_JOURNAL: 'deleted a journal entry',
